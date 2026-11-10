@@ -1,6 +1,6 @@
 # BRIDGE v2 — Hackathon Round 2 Progress Log
 
-**Branch**: `main`  
+**Branch**: `main`
 **Target Deadline**: Under 3 hours  
 **Live Public Link**: Pending Phase 5 Deployment
 
@@ -14,7 +14,7 @@
 | **Phase 2** | Open Access (Guest auth, Try it now, self-signup, scoped permissions, 24h cleanup) | **DONE** | POST /api/v1/auth/guest live with real JWT + httpOnly refresh cookie, rate-limited per IP, audit-logged to hash chain. 'Try it now' & self-signup wired in UI. Stale 24h guest cleanup ready. |
 | **Phase 3** | Core Workflow (Review workspace, compliant/violating samples, verdict line, approved terms, hallucination defense, E2E test) | **DONE** | Tested full flow: guest creation -> paste sample -> approved terms & AI validation -> severity-sorted findings & citations -> request changes decision -> audit chain verified. Full test suite: 40 passed, 1 skipped. Frontend built <330 kB. |
 | **Phase 4** | Live AI (Gemini integration, code fence tolerance, retries, fallback_used flag, re-embed 768d) | **DONE** | Verified `/api/v1/ai/status` (provider=gemini, mode=fallback/live, model, last_error), 30 tenant passages re-embedded at 768d (never mixing mock and live vectors), validation with fallback_used=True and 35 findings/receipts, retry with exponential backoff & markdown code fence tolerance. |
-| **Phase 5** | Deploy (Backend Dockerfile, Vercel frontend rewrite, DEPLOY.md, smoke.sh) | **ready-for-deploy** | `/health` does not call the database; Docker runs as non-root, uses Render's `$PORT`, and startup runs Alembic before Uvicorn; `start.sh` is LF. Frontend retries network errors/timeouts for up to 90 seconds and shows “Waking up the server...”. `DEPLOY.md` contains Render/Vercel variables and setup clicks. **Exact next step:** deploy the backend and frontend using `DEPLOY.md`, then run `bash scripts/smoke.sh <backend-url> <frontend-url>`. |
+| **Phase 5** | Deploy (Backend Dockerfile, Vercel frontend rewrite, DEPLOY.md, smoke.sh) | **ready-for-deploy** | `/health` does not call the database; Docker runs as non-root, uses Render's `$PORT`, and startup runs Alembic before Uvicorn; `start.sh` is LF. Frontend build and API Python syntax compile pass. Frontend retries network errors/timeouts for up to 90 seconds and shows “Waking up the server...”. `DEPLOY.md` contains Render/Vercel variables and setup clicks. **Exact next step:** deploy the backend and frontend using `DEPLOY.md`, then run `bash scripts/smoke.sh <backend-url> <frontend-url>`. |
 | **Phase 6** | Verification & Submission Pack (Browser run, docs/FEATURES.md, TECH.md, CHANGES.md, ROUND3.md, README.md, PDF) | **TODO** | Starts after Phase 5 is DONE. |
 
 ---
