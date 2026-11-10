@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbDep
-from app.api.v1 import auth, users, organisations, knowledge, validation, continuity, guideline, audit
+from app.api.v1 import auth, users, organisations, knowledge, validation, continuity, guideline, audit, demo
 from app.models.knowledge import ItemStatus, ItemVersion, KnowledgeItem
 from app.models.validation import Finding, FindingStatus
 from app.models.continuity import RevalidationStatus, RevalidationTask
@@ -21,6 +21,7 @@ router.include_router(knowledge.router)
 router.include_router(validation.router)
 router.include_router(continuity.router)
 router.include_router(guideline.router)
+router.include_router(demo.router)
 router.include_router(audit.router)
 
 
