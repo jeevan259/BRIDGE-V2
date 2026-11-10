@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layers, ShieldCheck, ArrowRight, UserCircle2, KeyRound } from 'lucide-react';
+import { Layers, ShieldCheck, ArrowRight, UserCircle2, KeyRound, Sparkles } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth';
 import apiClient from '@/lib/api';
 import { Button } from '@/components/ui/Button';
@@ -17,31 +17,31 @@ const DEMO_PRESETS: DemoUserPreset[] = [
   {
     role: 'administrator',
     label: 'Administrator',
-    email: 'admin@bridge.local',
-    description: 'Full system governance, impact simulation & chain verification',
+    email: 'admin@aurora.local',
+    description: 'Full governance, impact simulation & chain verification',
   },
   {
     role: 'brand_manager',
     label: 'Brand Manager',
-    email: 'brand_manager@bridge.local',
+    email: 'brand_manager@aurora.local',
     description: 'Knowledge source management, rule approvals & GuidelineX',
   },
   {
     role: 'reviewer',
     label: 'Reviewer',
-    email: 'reviewer@bridge.local',
+    email: 'reviewer@aurora.local',
     description: 'Content review queues, evidence override & signals logging',
   },
   {
     role: 'creator',
     label: 'Creator',
-    email: 'creator@bridge.local',
+    email: 'creator@aurora.local',
     description: 'Asset submission & pre-flight deterministic validation',
   },
   {
     role: 'auditor',
     label: 'Auditor',
-    email: 'auditor@bridge.local',
+    email: 'auditor@aurora.local',
     description: 'Read-only compliance telemetry & cryptographic chain audit',
   },
 ];
@@ -65,55 +65,91 @@ const createDemoUser = (userEmail: string): User => {
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuthStore();
-  const [email, setEmail] = useState('admin@bridge.local');
+  const [email, setEmail] = useState('admin@aurora.local');
   const [password, setPassword] = useState('password123');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
+    return Boolean(
+      import.meta.env.VITE_DEMO_MODE === 'true' ||
+      import.meta.env.VITE_DEMO_MODE === true
+    );
+  });
+
+  // Query health endpoint for demo_mode flag if not set via VITE
+  useEffect(() => {
+    let isMounted = true;
+    apiClient
+      .get<{ demo_mode?: boolean }>('/health', { baseURL: '' })
+      .then(({ data }) => {
+        if (isMounted && data?.demo_mode !== undefined) {
+          setIsDemoMode(Boolean(data.demo_mode));
+        }
+      })
+      .catch(() => {
+        // Fallback: check ready endpoint
+        apiClient
+          .get<{ demo_mode?: boolean }>('/ready', { baseURL: '' })
+          .then(({ data }) => {
+            if (isMounted && data?.demo_mode !== undefined) {
+              setIsDemoMode(Boolean(data.demo_mode));
+            }
+          })
+          .catch(() => {
+            // Keep default
+          });
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const performLogin = (token: string, user: User) => {
     login(token, user);
     navigate('/dashboard');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLoginWithCredentials = async (targetEmail: string, targetPassword = 'password123') => {
     setIsLoading(true);
     setError(null);
 
     try {
       const { data: tokenData } = await apiClient.post<{ access_token: string }>(
         '/auth/login',
-        { email, password }
+        { email: targetEmail, password: targetPassword }
       );
 
-      // Store token so immediate subsequent requests have it
       localStorage.setItem('bridge_access_token', tokenData.access_token);
-
-      // Fetch user profile
       const { data: userData } = await apiClient.get<User>('/auth/me');
-
       performLogin(tokenData.access_token, userData);
     } catch (err: any) {
-      console.warn('Backend API unseeded or unavailable, auto-activating demo profile:', err);
-      // Auto-fallback for demo / manual mode
-      const fallbackUser = createDemoUser(email);
-      const fallbackToken = 'bridge_demo_token_' + btoa(JSON.stringify(fallbackUser));
-      performLogin(fallbackToken, fallbackUser);
+      console.warn('Backend API login failed, checking fallback:', err);
+      if (isDemoMode) {
+        // Auto-fallback in demo mode only
+        const fallbackUser = createDemoUser(targetEmail);
+        const fallbackToken = 'bridge_demo_token_' + btoa(JSON.stringify(fallbackUser));
+        performLogin(fallbackToken, fallbackUser);
+      } else {
+        const msg =
+          err?.response?.data?.detail ||
+          err?.message ||
+          'Failed to authenticate with BRIDGE API. Verify credentials or run seed script.';
+        setError(String(msg));
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleManualLogin = () => {
-    const fallbackUser = createDemoUser(email);
-    const fallbackToken = 'bridge_demo_token_' + btoa(JSON.stringify(fallbackUser));
-    performLogin(fallbackToken, fallbackUser);
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleLoginWithCredentials(email, password);
   };
 
-  const handleSelectPreset = (preset: DemoUserPreset) => {
+  const handleOneClickDemoLogin = (preset: DemoUserPreset) => {
     setEmail(preset.email);
     setPassword('password123');
-    setError(null);
+    handleLoginWithCredentials(preset.email, 'password123');
   };
 
   return (
@@ -133,42 +169,51 @@ export const LoginPage: React.FC = () => {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-xl relative z-10 px-4">
         <div className="bg-[#151D2F] py-8 px-6 sm:px-10 border border-slate-800 rounded-2xl shadow-2xl space-y-6">
-          {/* Quick Demo Role Picker */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 font-mono">
-              Demo Quick-Select Profile
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {DEMO_PRESETS.map((preset) => {
-                const isSelected = email === preset.email;
-                return (
+          {/* Quick Demo Role Picker — visible only in DEMO_MODE */}
+          {isDemoMode && (
+            <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold uppercase tracking-wider text-blue-300 font-mono flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  One-Click Demo Personas
+                </label>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  DEMO_MODE=true
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {DEMO_PRESETS.map((preset) => (
                   <button
                     key={preset.role}
                     type="button"
-                    onClick={() => handleSelectPreset(preset)}
-                    className={`p-2.5 rounded-lg border text-left transition-all ${
-                      isSelected
-                        ? 'border-blue-500 bg-blue-500/10 text-blue-300 ring-1 ring-blue-500'
-                        : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-                    }`}
+                    disabled={isLoading}
+                    onClick={() => handleOneClickDemoLogin(preset)}
+                    className="p-2.5 rounded-lg border border-slate-800 bg-slate-900/80 text-left transition-all hover:border-blue-500/50 hover:bg-blue-500/10 group cursor-pointer disabled:opacity-50"
                   >
-                    <span className="block text-xs font-semibold">{preset.label}</span>
-                    <span className="block text-[10px] text-slate-500 truncate mt-0.5">
-                      {preset.email.split('@')[0]}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-200 group-hover:text-blue-300">
+                        Login as {preset.label}
+                      </span>
+                      <ArrowRight className="w-3 h-3 text-slate-500 group-hover:text-blue-400 transition-transform group-hover:translate-x-0.5" />
+                    </div>
+                    <span className="block text-[10px] text-slate-400 font-mono mt-0.5">
+                      {preset.email}
                     </span>
                   </button>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="relative flex py-1 items-center">
-            <div className="flex-grow border-t border-slate-800" />
-            <span className="flex-shrink mx-4 text-xs uppercase font-mono text-slate-500">
-              Sign In
-            </span>
-            <div className="flex-grow border-t border-slate-800" />
-          </div>
+          {isDemoMode && (
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-slate-800" />
+              <span className="flex-shrink mx-4 text-xs uppercase font-mono text-slate-500">
+                Or Sign In Manually
+              </span>
+              <div className="flex-grow border-t border-slate-800" />
+            </div>
+          )}
 
           {error && (
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-400 text-xs flex items-center gap-2">
@@ -224,16 +269,6 @@ export const LoginPage: React.FC = () => {
             >
               Sign In to BRIDGE Tenant
             </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              size="md"
-              onClick={handleManualLogin}
-              className="w-full mt-2 border-slate-700 hover:bg-slate-800 text-slate-300"
-            >
-              Instant Manual Demo Sign-In
-            </Button>
           </form>
 
           <div className="pt-2 text-center text-xs text-slate-500 font-mono">
@@ -244,4 +279,3 @@ export const LoginPage: React.FC = () => {
     </div>
   );
 };
-
