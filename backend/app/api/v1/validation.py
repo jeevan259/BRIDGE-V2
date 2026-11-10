@@ -49,6 +49,17 @@ async def submit_validation_job(
         },
         org_id=current_user.org_id,
     )
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="VALIDATION_JOB_SUBMITTED",
+        actor=current_user,
+        resource_type="validation_job",
+        resource_id=str(job.id),
+        diff_json={"content_title": body.content_title},
+    )
     return ValidationJobResponse.model_validate(job)
 
 

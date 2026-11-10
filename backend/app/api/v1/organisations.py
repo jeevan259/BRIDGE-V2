@@ -59,6 +59,17 @@ async def create_organisation(
     org = Organisation(name=body.name, slug=body.slug)
     db.add(org)
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=org.id,
+        event_type="ORGANISATION_CREATED",
+        actor=current_user,
+        resource_type="organisation",
+        resource_id=str(org.id),
+        diff_json={"name": org.name, "slug": org.slug},
+    )
     return OrganisationResponse.model_validate(org)
 
 
@@ -93,4 +104,15 @@ async def update_organisation(
     if body.is_active is not None:
         org.is_active = body.is_active
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=org.id,
+        event_type="ORGANISATION_UPDATED",
+        actor=current_user,
+        resource_type="organisation",
+        resource_id=str(org.id),
+        diff_json={"name": org.name, "is_active": org.is_active},
+    )
     return OrganisationResponse.model_validate(org)

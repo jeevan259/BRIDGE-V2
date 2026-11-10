@@ -67,6 +67,17 @@ async def create_edge(
         edge.confirmed_at = datetime.now(timezone.utc)
     db.add(edge)
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="DEPENDENCY_EDGE_CREATED",
+        actor=current_user,
+        resource_type="dependency_edge",
+        resource_id=str(edge.id),
+        diff_json={"content_identifier": body.content_identifier, "edge_type": body.edge_type.value},
+    )
     return DependencyEdgeResponse.model_validate(edge)
 
 
@@ -90,6 +101,17 @@ async def confirm_edge(
     edge.confirmed_by = current_user.id
     edge.confirmed_at = datetime.now(timezone.utc)
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="DEPENDENCY_EDGE_CONFIRMED",
+        actor=current_user,
+        resource_type="dependency_edge",
+        resource_id=str(edge.id),
+        diff_json={"content_identifier": edge.content_identifier, "status": "confirmed"},
+    )
     return DependencyEdgeResponse.model_validate(edge)
 
 
@@ -209,4 +231,15 @@ async def update_revalidation_task(
     if body.assigned_to is not None:
         task.assigned_to = body.assigned_to
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="REVALIDATION_TASK_UPDATED",
+        actor=current_user,
+        resource_type="revalidation_task",
+        resource_id=str(task.id),
+        diff_json={"status": task.status.value, "assigned_to": str(task.assigned_to) if task.assigned_to else None},
+    )
     return RevalidationTaskResponse.model_validate(task)

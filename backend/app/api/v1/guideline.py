@@ -39,6 +39,21 @@ async def create_review_signal(
     )
     db.add(signal)
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="REVIEW_SIGNAL_CREATED",
+        actor=current_user,
+        resource_type="review_signal",
+        resource_id=str(signal.id),
+        diff_json={
+            "item_id": str(body.item_id) if body.item_id else None,
+            "source_type": body.source_type.value,
+            "severity": body.severity.value,
+        },
+    )
     return ReviewSignalResponse.model_validate(signal)
 
 

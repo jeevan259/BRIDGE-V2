@@ -62,6 +62,17 @@ async def create_source(
     )
     db.add(source)
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="SOURCE_CREATED",
+        actor=current_user,
+        resource_type="knowledge_source",
+        resource_id=str(source.id),
+        diff_json={"name": source.name, "source_type": source.source_type.value},
+    )
     return KnowledgeSourceResponse.model_validate(source)
 
 
@@ -102,6 +113,17 @@ async def update_source(
     if body.is_active is not None:
         source.is_active = body.is_active
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="SOURCE_UPDATED",
+        actor=current_user,
+        resource_type="knowledge_source",
+        resource_id=str(source.id),
+        diff_json={"name": source.name, "is_active": source.is_active},
+    )
     return KnowledgeSourceResponse.model_validate(source)
 
 
@@ -173,6 +195,17 @@ async def create_item(
     await db.flush()
     item.current_version_id = version.id
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="ITEM_CREATED",
+        actor=current_user,
+        resource_type="knowledge_item",
+        resource_id=str(item.id),
+        diff_json={"title": item.title, "item_type": item.item_type.value},
+    )
 
     return KnowledgeItemResponse.model_validate(item)
 
