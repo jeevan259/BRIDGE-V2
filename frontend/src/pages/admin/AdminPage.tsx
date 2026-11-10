@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   UserCheck,
   Building2,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { User, UserList, UserRole } from '@/types';
@@ -29,6 +31,33 @@ export const AdminPage: React.FC = () => {
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('password123');
   const [newUserRole, setNewUserRole] = useState<UserRole>('creator');
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  // Check health probe for demo_mode flag
+  const { data: healthData } = useQuery<{ demo_mode?: boolean }>({
+    queryKey: ['system-health'],
+    queryFn: async () => {
+      try {
+        const { data } = await apiClient.get('/health', { baseURL: '' });
+        return data;
+      } catch {
+        // Fallback to checking ready endpoint
+        try {
+          const { data } = await apiClient.get('/ready', { baseURL: '' });
+          return data;
+        } catch {
+          return { demo_mode: false };
+        }
+      }
+    },
+    staleTime: 60000,
+  });
+
+  const isDemoMode = Boolean(
+    import.meta.env.VITE_DEMO_MODE === 'true' ||
+    import.meta.env.VITE_DEMO_MODE === true ||
+    healthData?.demo_mode
+  );
 
   // Fetch users
   const {
@@ -61,6 +90,16 @@ export const AdminPage: React.FC = () => {
     },
   });
 
+  const resetDemoMutation = useMutation({
+    mutationFn: async () => {
+      await apiClient.post('/demo/seed?reset=true');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+      setIsResetConfirmOpen(false);
+    },
+  });
+
   const users = usersData?.items || [];
 
   return (
@@ -76,14 +115,27 @@ export const AdminPage: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          leftIcon={<Plus className="w-4 h-4" />}
-          onClick={() => setIsAddUserOpen(true)}
-        >
-          Provision User
-        </Button>
+        <div className="flex items-center gap-2">
+          {isDemoMode && user?.role === 'administrator' && (
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<RotateCcw className="w-4 h-4 text-amber-400" />}
+              onClick={() => setIsResetConfirmOpen(true)}
+              className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+            >
+              Reset Demo
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={<Plus className="w-4 h-4" />}
+            onClick={() => setIsAddUserOpen(true)}
+          >
+            Provision User
+          </Button>
+        </div>
       </div>
 
       {/* Tenant Metadata Card */}
@@ -238,6 +290,38 @@ export const AdminPage: React.FC = () => {
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
               />
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reset Demo Confirmation Modal */}
+      <Modal
+        isOpen={isResetConfirmOpen}
+        onClose={() => setIsResetConfirmOpen(false)}
+        title="Reset Demo Tenant"
+        description="This action will purge and re-initialize the Aurora Outdoors demo tenant data."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setIsResetConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={resetDemoMutation.isPending}
+              onClick={() => resetDemoMutation.mutate()}
+            >
+              Reset All Demo Data
+            </Button>
+          </>
+        }
+      >
+        <div className="flex items-start gap-3 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-300">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-amber-200">Warning: Destructive Reset</p>
+            <p className="text-slate-400">
+              This will remove all created assets, findings, reviewer overrides, and re-create the pristine Aurora Outdoors brand demo dataset. This action cannot be undone.
+            </p>
           </div>
         </div>
       </Modal>

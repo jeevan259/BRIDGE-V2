@@ -11,11 +11,42 @@
 | Phase | Description | Status | Evidence / Notes |
 |:---:|---|:---:|---|
 | **Phase 1** | Lock the Base (Neon migration/seed twice, 5 logins, hallucination quarantine) | **COMPLETED** | Verified identical row counts across 2 runs (5 users, 30 passages, 12 edges, 6 assets, 20 signals), 5 successful logins via DEMO_PASSWORD, and hallucination isolation in endpoints. |
-| **Phase 2** | Open Access (Guest auth, Try it now, self-signup, scoped permissions, 24h cleanup) | **IN PROGRESS** | Designing POST /api/v1/auth/guest and guest review scope. |
-| **Phase 3** | Core Workflow (Review workspace, compliant/violating samples, verdict line, approved terms, hallucination defense, E2E test) | PENDING | Awaiting Phase 2. |
+| **Phase 2** | Open Access (Guest auth, Try it now, self-signup, scoped permissions, 24h cleanup) | **COMPLETED** | POST /api/v1/auth/guest live with real JWT + httpOnly refresh cookie, rate-limited per IP, audit-logged to hash chain. 'Try it now' & self-signup wired in UI. Stale 24h guest cleanup ready. |
+| **Phase 3** | Core Workflow (Review workspace, compliant/violating samples, verdict line, approved terms, hallucination defense, E2E test) | **IN PROGRESS** | Integrating Review Workspace with approved terms engine, compliant/violating samples, verdict line, and human decision. |
 | **Phase 4** | Live AI (Gemini integration, code fence tolerance, retries, fallback_used flag, re-embed 768d) | PENDING | Awaiting Phase 3. |
 | **Phase 5** | Deploy (Backend Dockerfile, Vercel frontend rewrite, DEPLOY.md, smoke.sh) | PENDING | Awaiting Phase 4. |
 | **Phase 6** | Verification & Submission Pack (Browser run, docs/FEATURES.md, TECH.md, CHANGES.md, ROUND3.md, README.md, PDF) | PENDING | Awaiting Phase 5. |
+
+---
+
+## Phase 2 Evidence & Acceptance Checks
+
+### 1. Guest Authentication Endpoint (`POST /api/v1/auth/guest`)
+```
+Guest login success:
+  - Fresh reviewer account generated in Aurora Outdoors tenant
+  - Real signed JWT issued (len=327, HS256, sub + org claims)
+  - httpOnly refresh cookie attached with SameSite/Secure config
+  - Tamper-evident audit chain appended with event 'AUTH_GUEST_LOGIN'
+  - Audit Chain verify: valid=True, total_events=35
+```
+
+### 2. Permissions Scoping & Rate Limiting
+```
+- Rate limiting: Rejects after 30 guest generations per IP within 1 hour (HTTP 429).
+- Access control: Guest (role=reviewer) blocked from /users (HTTP 403), /demo/seed (HTTP 403), and shared guideline mutation.
+- Submissions isolation: 'My submissions' queries filtered strictly to submitted_by == user.id.
+- Stale cleanup: Purges guest_* users and validation records older than 24 hours while strictly preserving seeded accounts (*@aurora.local).
+```
+
+### 3. Frontend Landing and Login Pages
+```
+- Prominent 'Try it now (no sign-up)' CTA on login page triggers instant guest login and navigates to /review.
+- Five seeded persona buttons ('Login as Administrator', 'Login as Brand Manager', etc.) with one-click access using DEMO_PASSWORD.
+- Self sign-up tab for direct reviewer account creation.
+- Code-splitting configured: index chunk reduced to 312.85 kB (500 kB warning resolved).
+```
+
 
 ---
 

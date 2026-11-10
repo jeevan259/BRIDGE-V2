@@ -26,13 +26,18 @@ const getInitialUser = (): User | null => {
 };
 
 export const useAuthStore = create<AuthState>((set) => {
+  const storedToken = localStorage.getItem(TOKEN_KEY);
+  if (storedToken?.startsWith('bridge_demo_token_')) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  }
   const initialUser = getInitialUser();
   const initialToken = localStorage.getItem(TOKEN_KEY);
 
   return {
     user: initialUser,
     token: initialToken,
-    isAuthenticated: !!initialToken || !!initialUser,
+    isAuthenticated: !!initialToken && !!initialUser,
     isLoading: !initialUser && !!initialToken,
 
     setUser: (user) => {
@@ -41,7 +46,7 @@ export const useAuthStore = create<AuthState>((set) => {
       } else {
         localStorage.removeItem(USER_KEY);
       }
-      set({ user, isAuthenticated: !!user });
+      set({ user, isAuthenticated: !!user && !!localStorage.getItem(TOKEN_KEY) });
     },
 
     setToken: (token) => {
@@ -50,7 +55,7 @@ export const useAuthStore = create<AuthState>((set) => {
       } else {
         localStorage.removeItem(TOKEN_KEY);
       }
-      set({ token, isAuthenticated: !!token });
+      set({ token, isAuthenticated: !!token && !!localStorage.getItem(USER_KEY) });
     },
 
     login: (token, user) => {

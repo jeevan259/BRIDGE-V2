@@ -2,28 +2,30 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/auth';
 import { StatusChip } from '../ui/StatusChip';
-import { Building2, Sparkles, Cpu } from 'lucide-react';
-import axios from 'axios';
+import { Building2 } from 'lucide-react';
+import apiClient from '@/lib/api';
+
+interface AIStatus {
+  provider: string;
+  mode: 'live' | 'fallback' | 'mock';
+  model: string;
+  last_error: string | null;
+}
 
 export const TopBar: React.FC = () => {
   const { user } = useAuthStore();
 
-  // Query health for live AI status
-  const { data: health } = useQuery<{ ai_status?: string }>({
-    queryKey: ['health-status'],
+  const { data: aiStatus } = useQuery<AIStatus>({
+    queryKey: ['ai-status'],
     queryFn: async () => {
-      try {
-        const { data } = await axios.get('/health');
-        return data;
-      } catch {
-        return { ai_status: 'AI: offline mode' };
-      }
+      const { data } = await apiClient.get<AIStatus>('/ai/status');
+      return data;
     },
     refetchInterval: 30000,
   });
 
-  const aiStatus = health?.ai_status || 'AI: offline mode';
-  const isOnline = aiStatus.toLowerCase().includes('online');
+  const mode = aiStatus?.mode;
+  const label = mode === 'live' ? 'AI: Gemini live' : mode === 'fallback' ? 'AI: fallback' : mode === 'mock' ? 'AI: mock' : 'AI: status unavailable';
 
   return (
     <header className="h-16 bg-[#0F172A]/90 backdrop-blur-md border-b border-slate-800 fixed top-0 right-0 left-64 z-20 px-8 flex items-center justify-between">
@@ -44,17 +46,19 @@ export const TopBar: React.FC = () => {
         {/* Dynamic AI Status Badge */}
         <div
           className={`flex items-center gap-2 text-xs font-mono px-2.5 py-1 rounded-full border ${
-            isOnline
+            mode === 'live'
               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+              : mode === 'fallback'
+              ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+              : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
           }`}
         >
           <span
             className={`w-2 h-2 rounded-full ${
-              isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+              mode === 'live' ? 'bg-emerald-400 animate-pulse' : mode === 'fallback' ? 'bg-amber-400' : 'bg-slate-400'
             }`}
           />
-          <span>{aiStatus.toUpperCase()}</span>
+          <span>{label}</span>
         </div>
 
         {/* User Role Chip */}
