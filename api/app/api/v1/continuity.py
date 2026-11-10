@@ -24,7 +24,9 @@ router = APIRouter(prefix="/continuity", tags=["continuity"])
 @router.get("/edges", response_model=DependencyEdgeList)
 async def list_edges(
     db: DbDep,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_role(
+        UserRole.administrator, UserRole.brand_manager, UserRole.reviewer, UserRole.auditor
+    )),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> DependencyEdgeList:

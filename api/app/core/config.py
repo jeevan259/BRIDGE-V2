@@ -15,7 +15,7 @@ logger = logging.getLogger("bridge.config")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -41,12 +41,16 @@ class Settings(BaseSettings):
     # AI Provider
     ai_provider: str = "mock"  # gemini | mock | adversarial
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_embedding_model: str = "gemini-embedding-2"
+    gemini_embedding_dimensions: int = 768
 
     # App
     environment: str = "development"
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "/tmp/bridge_uploads"
     demo_mode: bool = False
+    demo_password: str = "password123"
 
     # Derived status
     ai_status: str = "AI: offline mode"
@@ -65,6 +69,30 @@ class Settings(BaseSettings):
         if val in ("lax", "strict", "none"):
             return val
         return "lax"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def clean_asyncpg_database_url(cls, v: str) -> str:
+        """Sanitize Postgres URL for SQLAlchemy asyncpg driver.
+        asyncpg does not accept sslmode or channel_binding as query parameters;
+        it requires ssl=require instead of sslmode=require.
+        Also ensures postgresql+asyncpg:// scheme is present.
+        """
+        if not v:
+            return v
+        if not v.startswith("postgresql+asyncpg://") and v.startswith("postgresql://"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        import urllib.parse
+        parsed = urllib.parse.urlparse(v)
+        if parsed.query:
+            q_dict = urllib.parse.parse_qs(parsed.query)
+            q_dict.pop("channel_binding", None)
+            ssl_val = q_dict.pop("sslmode", None)
+            if ssl_val and "ssl" not in q_dict:
+                q_dict["ssl"] = ssl_val
+            new_query = urllib.parse.urlencode(q_dict, doseq=True)
+            v = urllib.parse.urlunparse(parsed._replace(query=new_query))
+        return v
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -96,16 +124,13 @@ class Settings(BaseSettings):
                 "Please generate a secure 32+ byte key via: python -c 'import secrets; print(secrets.token_hex(32))'"
             )
 
-        # 3. Gemini API Key check (P0 rule: missing key MUST NOT crash, only produce visible 'AI: offline mode')
+        # 3. Gemini key is mandatory in production; development requests may fall back per call.
         if self.ai_provider == "gemini" and not self.gemini_api_key.strip():
-            object.__setattr__(self, "ai_provider", "mock")
-            object.__setattr__(self, "ai_status", "AI: offline mode (Gemini key not configured)")
-            logger.warning(
-                "AI: offline mode — GEMINI_API_KEY is not set. "
-                "Operating with deterministic mock engine. System remains fully operational."
-            )
+            if not self.is_development:
+                raise ValueError("GEMINI_API_KEY is required when AI_PROVIDER=gemini in production")
+            object.__setattr__(self, "ai_status", "AI: fallback (Gemini key not configured)")
         elif self.ai_provider == "gemini":
-            object.__setattr__(self, "ai_status", "AI: online (Gemini 1.5)")
+            object.__setattr__(self, "ai_status", f"AI: Gemini live ({self.gemini_model})")
         else:
             object.__setattr__(self, "ai_status", "AI: offline mode (Deterministic Mock)")
 

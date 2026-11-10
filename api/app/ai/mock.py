@@ -80,6 +80,7 @@ class HashEmbeddingProvider(EmbeddingProvider):
             provider=self.provider_name,
             is_offline=True,
             dimensions=self.DIMENSIONS,
+            model="hash-embedding-v1",
         )
 
     def _hash_to_vector(self, text: str) -> list[float]:

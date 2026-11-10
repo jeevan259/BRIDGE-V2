@@ -13,6 +13,8 @@ class Organisation(UUIDMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    embedding_provider: Mapped[str] = mapped_column(String(32), default="mock", server_default="mock", nullable=False)
+    embedding_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="organisation", lazy="select")  # type: ignore[name-defined]

@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 
 from app.ai.gemini import get_embedding_provider
 from app.database import AsyncSessionLocal
@@ -48,6 +51,7 @@ from app.models.knowledge import (
 from app.models.organisation import Organisation
 from app.models.user import User, UserRole
 from app.models.validation import (
+    ContentItem,
     EvidenceReceipt,
     Finding,
     FindingCitation,
@@ -114,6 +118,15 @@ PASSAGES_V3 = [
     ("5.1 Accessibility - WCAG Contrast (v3 Enhanced)", "All digital color pairings must pass WCAG 2.1 AAA contrast (7:1) for body text and AA (4.5:1) for headings. Sunset Ochre text is disallowed on light backgrounds."),
 ]
 
+SAMPLE_ASSET_TITLES = [
+    ("Homepage Spring Launch Copy", "web"),
+    ("Flash Sale Ad Banner Concept", "web"),
+    ("Venture Capital Pitch Deck Slide", "press"),
+    ("Summit Technical Ice Axe Packaging Slip", "packaging"),
+    ("Eco-Trail Social Post Campaign", "social"),
+    ("Co-Branded Trail Marathon Email Newsletter", "social"),
+]
+
 
 async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, str]:
     """Seed the Aurora Outdoors demo tenant idempotently.
@@ -132,14 +145,42 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
         await db.flush()
         existing_org = None
 
+    demo_pw = os.getenv("DEMO_PASSWORD") or getattr(settings, "demo_password", "password123")
+    pw_hash = hash_password(demo_pw)
+
     if existing_org and not reset:
-        logger.info("Aurora Outdoors organization already exists. Seeding is idempotent.")
+        logger.info("Aurora Outdoors organization already exists. Ensuring user passwords and assets...")
+        existing_users = (
+            await db.execute(select(User).where(User.org_id == existing_org.id))
+        ).scalars().all()
+        for u in existing_users:
+            if u.email.endswith("@aurora.local"):
+                u.hashed_password = pw_hash
+        
+        existing_assets = (await db.execute(
+            select(func.count()).select_from(ContentItem).where(ContentItem.org_id == existing_org.id)
+        )).scalar_one()
+        if existing_assets < 6:
+            existing_creator = next((u for u in existing_users if u.role == UserRole.creator), None)
+            creator_id = existing_creator.id if existing_creator else None
+            for idx, (title, channel) in enumerate(SAMPLE_ASSET_TITLES):
+                ci_exists = (await db.execute(
+                    select(ContentItem).where(ContentItem.org_id == existing_org.id, ContentItem.title == title)
+                )).scalar_one_or_none()
+                if not ci_exists:
+                    db.add(ContentItem(
+                        org_id=existing_org.id,
+                        title=title,
+                        content_identifier=f"asset-{idx + 1}",
+                        channel=channel,
+                        created_by=creator_id,
+                    ))
+        await db.flush()
         return {
             "status": "already_seeded",
             "org_id": str(existing_org.id),
             "org_name": existing_org.name,
             "admin_email": "admin@aurora.local",
-            "password": "password123",
         }
 
     embedder = get_embedding_provider()
@@ -148,17 +189,11 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
     org = Organisation(
         name=AURORA_NAME,
         slug=AURORA_SLUG,
-        settings={
-            "tier": "enterprise",
-            "industry": "Outdoor Apparel & Technical Gear",
-            "features": ["continuity", "guideline_x", "audit_chain", "pgvector_search"],
-        },
     )
     db.add(org)
     await db.flush()
 
     # 2. Create 5 Users with standard roles
-    pw_hash = hash_password("password123")
     users: dict[UserRole, User] = {}
     for email, full_name, role in DEMO_USERS_INFO:
         u = User(
@@ -247,12 +282,24 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
 
     # Ingest Passages for v1 (the ~25 passages)
     passages_v1_objs: list[Passage] = []
-    texts_to_embed: list[str] = [t[1] for t in PASSAGES_V1]
-    embed_res = await embedder.embed(texts_to_embed)
+    passage_specs = PASSAGES_V1 + PASSAGES_V2 + PASSAGES_V3
+    embed_res = await embedder.embed([text for _, text in passage_specs])
+    if embed_res.provider == "gemini" and embed_res.dimensions != 768:
+        raise ValueError("Gemini embedding dimension must be 768 for this tenant")
+    org.embedding_provider = "gemini" if embed_res.provider == "gemini" else "mock"
+    org.embedding_model = embed_res.model
+    await db.flush()
+
+    def embedding_fields(index: int) -> dict[str, list[float] | None]:
+        vector = embed_res.embeddings[index] if index < len(embed_res.embeddings) else None
+        return (
+            {"embedding_vector": vector, "embedding_json": None}
+            if embed_res.provider == "gemini"
+            else {"embedding_vector": None, "embedding_json": vector}
+        )
 
     char_cursor = 0
     for idx, (title, text) in enumerate(PASSAGES_V1):
-        emb = embed_res.embeddings[idx] if idx < len(embed_res.embeddings) else None
         p = Passage(
             org_id=org.id,
             source_id=source.id,
@@ -261,7 +308,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
             text=f"[{title}] {text}",
             char_start=char_cursor,
             char_end=char_cursor + len(text) + len(title) + 3,
-            embedding_json=emb,
+            **embedding_fields(idx),
         )
         db.add(p)
         passages_v1_objs.append(p)
@@ -271,6 +318,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
 
     # Passages for v2 and v3
     for idx, (title, text) in enumerate(PASSAGES_V2):
+        embedding_index = len(PASSAGES_V1) + idx
         p = Passage(
             org_id=org.id,
             source_id=source.id,
@@ -279,11 +327,12 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
             text=f"[{title}] {text}",
             char_start=0,
             char_end=len(text),
-            embedding_json=(await embedder.embed([text])).embeddings[0],
+            **embedding_fields(embedding_index),
         )
         db.add(p)
 
     for idx, (title, text) in enumerate(PASSAGES_V3):
+        embedding_index = len(PASSAGES_V1) + len(PASSAGES_V2) + idx
         p = Passage(
             org_id=org.id,
             source_id=source.id,
@@ -292,7 +341,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
             text=f"[{title}] {text}",
             char_start=0,
             char_end=len(text),
-            embedding_json=(await embedder.embed([text])).embeddings[0],
+            **embedding_fields(embedding_index),
         )
         db.add(p)
 
@@ -432,7 +481,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
             "HUGE CLEARANCE! Don't miss our legendary gear now featuring our iconic mountain logo over a vibrant neon red gradient background (#FF0000). Limited inventory!",
             JobStatus.completed,
             [
-                (FindingType.brand_violation, FindingSeverity.critical, "Critical Brand Violation: Uses prohibited saturated red background (#FF0000) behind logo mark.", True, items[1], passages_v1_objs[3]),
+                (FindingType.brand_violation, FindingSeverity.high, "Critical Brand Violation: Uses prohibited saturated red background (#FF0000) behind logo mark.", True, items[1], passages_v1_objs[3]),
                 (FindingType.brand_violation, FindingSeverity.high, "Infringes logo minimum clearspace and safe boundary standards.", True, items[0], passages_v1_objs[0]),
             ],
         ),
@@ -451,7 +500,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
             "Engineered for vertical alpine couloirs and frozen cascades. Ultra-light titanium shaft with aggressive carbon pick. Get outside and push your boundaries.",
             JobStatus.completed,
             [
-                (FindingType.brand_violation, FindingSeverity.critical, "Missing Mandatory Statutory Disclaimer: Technical climbing gear packaging must carry alpine risk disclosure.", True, items[3], passages_v1_objs[16]),
+                (FindingType.brand_violation, FindingSeverity.high, "Missing Mandatory Statutory Disclaimer: Technical climbing gear packaging must carry alpine risk disclosure.", True, items[3], passages_v1_objs[16]),
             ],
         ),
         # Asset 5: Unverified Greenwashing (Overridden Finding)
@@ -472,7 +521,17 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
         ),
     ]
 
-    for title, text, jstatus, findings_spec in sample_assets:
+    for idx, (title, text, jstatus, findings_spec) in enumerate(sample_assets):
+        ci = ContentItem(
+            org_id=org.id,
+            title=title,
+            content_identifier=f"asset-{idx + 1}",
+            channel="web" if idx in (0, 1) else ("press" if idx == 2 else ("packaging" if idx == 3 else "social")),
+            created_by=creator.id,
+        )
+        db.add(ci)
+        await db.flush()
+
         job = ValidationJob(
             org_id=org.id,
             content_title=title,
@@ -692,6 +751,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
         exposure_score=95.0,
         status=RevalidationStatus.pending,
         assigned_to=reviewer.id,
+        created_at=datetime.now(timezone.utc),
     )
     task2 = RevalidationTask(
         impact_report_id=report.id,
@@ -702,6 +762,7 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
         exposure_score=90.0,
         status=RevalidationStatus.in_progress,
         assigned_to=bm.id,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(task1)
     db.add(task2)
@@ -725,7 +786,6 @@ async def seed_demo_tenant(db: AsyncSession, reset: bool = False) -> dict[str, s
         "org_id": str(org.id),
         "org_name": org.name,
         "admin_email": "admin@aurora.local",
-        "password": "password123",
     }
 
 

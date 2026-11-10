@@ -128,3 +128,45 @@ def test_provider_factory():
     assert llm.provider_name in ("mock", "adversarial", "gemini")
     assert emb.provider_name == "hash-embedding"
 
+
+def test_gemini_missing_key_falls_back_and_reports_mode():
+    from app.ai.gemini import get_ai_status, get_embedding_provider, get_llm_provider
+    from app.core.config import settings
+
+    async def _run():
+        old_provider = settings.ai_provider
+        old_key = settings.gemini_api_key
+        try:
+            object.__setattr__(settings, "ai_provider", "gemini")
+            object.__setattr__(settings, "gemini_api_key", "")
+            response = await get_llm_provider().complete("system", "content")
+            embeddings = await get_embedding_provider().embed(["brand rule"])
+            status = await get_ai_status()
+            assert response.provider == "mock"
+            assert response.fallback_used is True
+            assert embeddings.provider == "hash-embedding"
+            assert embeddings.fallback_used is True
+            assert status == {
+                "provider": "gemini",
+                "mode": "fallback",
+                "model": "mock-v1",
+                "last_error": "GEMINI_API_KEY is not configured",
+            }
+        finally:
+            object.__setattr__(settings, "ai_provider", old_provider)
+            object.__setattr__(settings, "gemini_api_key", old_key)
+
+    asyncio.run(_run())
+
+
+def test_production_gemini_requires_key():
+    from app.core.config import Settings
+
+    with pytest.raises(ValueError, match="GEMINI_API_KEY is required"):
+        Settings(
+            environment="production",
+            ai_provider="gemini",
+            gemini_api_key="",
+            jwt_secret_key="configured-test-secret",
+        )
+

@@ -19,7 +19,9 @@ correlation_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 SENSITIVE_PATTERNS = [
+    re.compile(r"(postgres(?:ql)?(?:\+[^:/]+)?://[^:/@\s]+:)[^@/\s]+(@)", re.IGNORECASE),
     re.compile(r"(password|passwd|pwd)\s*[=:]\s*['\"]?([^'\"\s,]+)", re.IGNORECASE),
+    re.compile(r"(x-goog-api-key|gemini_api_key)\s*[=:]\s*['\"]?([^'\"\s,]+)", re.IGNORECASE),
     re.compile(r"(access_token|refresh_token|token|jwt|secret|key)\s*[=:]\s*['\"]?([^'\"\s,]+)", re.IGNORECASE),
     re.compile(r"(Bearer\s+)([A-Za-z0-9\-_\.]+)", re.IGNORECASE),
 ]
@@ -50,8 +52,9 @@ def sanitize_value(key: str, value: Any) -> Any:
 
 def sanitize_text(text: str) -> str:
     """Scrub tokens and passwords from raw strings."""
-    for pattern in SENSITIVE_PATTERNS:
-        text = pattern.sub(r"\1 [REDACTED]", text)
+    for index, pattern in enumerate(SENSITIVE_PATTERNS):
+        replacement = r"\1[REDACTED]\2" if index == 0 else r"\1 [REDACTED]"
+        text = pattern.sub(replacement, text)
     return text
 
 

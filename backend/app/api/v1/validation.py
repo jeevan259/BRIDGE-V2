@@ -111,15 +111,83 @@ async def list_job_findings(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> FindingList:
+    # Quarantined hallucinations (unsupported citations) must NOT appear in normal findings
+    base_filter = [
+        Finding.job_id == job_id,
+        Finding.org_id == current_user.org_id,
+        Finding.finding_type != FindingType.unsupported,
+        Finding.is_evidence_backed == True,
+    ]
     total = (await db.execute(
-        select(func.count()).select_from(Finding).where(
-            Finding.job_id == job_id, Finding.org_id == current_user.org_id
-        )
+        select(func.count()).select_from(Finding).where(*base_filter)
     )).scalar_one()
     offset = (page - 1) * page_size
     result = await db.execute(
         select(Finding)
-        .where(Finding.job_id == job_id, Finding.org_id == current_user.org_id)
+        .where(*base_filter)
+        .order_by(Finding.severity.desc())
+        .offset(offset).limit(page_size)
+    )
+    findings = result.scalars().all()
+    return FindingList(
+        items=[FindingResponse.model_validate(f) for f in findings],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@router.get("/jobs/{job_id}/hallucination-defense", response_model=FindingList)
+async def list_job_hallucination_defense(
+    job_id: uuid.UUID,
+    db: DbDep,
+    current_user: CurrentUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> FindingList:
+    """Quarantined AI claims and invalid citations trapped by server-side verification."""
+    defense_filter = [
+        Finding.job_id == job_id,
+        Finding.org_id == current_user.org_id,
+        (Finding.finding_type == FindingType.unsupported) | (Finding.is_evidence_backed == False),
+    ]
+    total = (await db.execute(
+        select(func.count()).select_from(Finding).where(*defense_filter)
+    )).scalar_one()
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(Finding)
+        .where(*defense_filter)
+        .order_by(Finding.severity.desc())
+        .offset(offset).limit(page_size)
+    )
+    findings = result.scalars().all()
+    return FindingList(
+        items=[FindingResponse.model_validate(f) for f in findings],
+        total=total, page=page, page_size=page_size,
+    )
+
+
+@router.get("/hallucination-defense", response_model=FindingList)
+async def list_org_hallucination_defense(
+    db: DbDep,
+    current_user: CurrentUser,
+    job_id: uuid.UUID | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> FindingList:
+    """Organization-wide quarantined hallucinations trap log."""
+    defense_filter = [
+        Finding.org_id == current_user.org_id,
+        (Finding.finding_type == FindingType.unsupported) | (Finding.is_evidence_backed == False),
+    ]
+    if job_id:
+        defense_filter.append(Finding.job_id == job_id)
+    total = (await db.execute(
+        select(func.count()).select_from(Finding).where(*defense_filter)
+    )).scalar_one()
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(Finding)
+        .where(*defense_filter)
         .order_by(Finding.severity.desc())
         .offset(offset).limit(page_size)
     )

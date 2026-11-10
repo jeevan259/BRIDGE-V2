@@ -38,12 +38,29 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Override with environment variable if present
+from dotenv import load_dotenv
+# Load .env from workspace root if present, then api/.env
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 db_url = os.environ.get("DATABASE_URL") or os.environ.get(
     "DATABASE_SYNC_URL", "postgresql+asyncpg://bridge:bridge@localhost:5432/bridge"
 )
 # Async Alembic requires the asyncpg driver
 if not db_url.startswith("postgresql+asyncpg://") and db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+# Clean up asyncpg unsupported query parameters
+import urllib.parse
+parsed = urllib.parse.urlparse(db_url)
+if parsed.query:
+    q_dict = urllib.parse.parse_qs(parsed.query)
+    q_dict.pop("channel_binding", None)
+    ssl_val = q_dict.pop("sslmode", None)
+    if ssl_val and "ssl" not in q_dict:
+        q_dict["ssl"] = ssl_val
+    new_query = urllib.parse.urlencode(q_dict, doseq=True)
+    db_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
 
 config.set_main_option("sqlalchemy.url", db_url)
 

@@ -17,87 +17,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ── Enums ─────────────────────────────────────────────────────────────────
-    op.execute("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\"")
-    op.execute("CREATE EXTENSION IF NOT EXISTS \"vector\"")
-
-    user_role = postgresql.ENUM(
-        "administrator", "brand_manager", "reviewer", "creator", "auditor",
-        name="user_role"
-    )
-    user_role.create(op.get_bind())
-
-    source_type = postgresql.ENUM("document", "url", "manual", name="source_type")
-    source_type.create(op.get_bind())
-
-    ingestion_status = postgresql.ENUM(
-        "pending", "processing", "completed", "failed", name="ingestion_status"
-    )
-    ingestion_status.create(op.get_bind())
-
-    item_type = postgresql.ENUM("fact", "claim", "rule", "guideline", name="item_type")
-    item_type.create(op.get_bind())
-
-    item_status = postgresql.ENUM(
-        "pending", "approved", "superseded", "rejected", name="item_status"
-    )
-    item_status.create(op.get_bind())
-
-    job_status = postgresql.ENUM(
-        "pending", "running", "completed", "failed", name="job_status"
-    )
-    job_status.create(op.get_bind())
-
-    finding_type = postgresql.ENUM(
-        "brand_violation", "tone_issue", "factual_claim", "guideline_breach", "unsupported",
-        name="finding_type"
-    )
-    finding_type.create(op.get_bind())
-
-    finding_severity = postgresql.ENUM("high", "medium", "low", "info", name="finding_severity")
-    finding_severity.create(op.get_bind())
-
-    finding_status = postgresql.ENUM(
-        "pending", "confirmed", "overridden", "dismissed", name="finding_status"
-    )
-    finding_status.create(op.get_bind())
-
-    override_reason_code = postgresql.ENUM(
-        "rule_unclear", "context_exception", "finding_incorrect",
-        "source_not_relevant", "content_corrected", "other",
-        name="override_reason_code"
-    )
-    override_reason_code.create(op.get_bind())
-
-    edge_type = postgresql.ENUM("confirmed", "possible", name="edge_type")
-    edge_type.create(op.get_bind())
-
-    revalidation_priority = postgresql.ENUM("high", "medium", "low", name="revalidation_priority")
-    revalidation_priority.create(op.get_bind())
-
-    revalidation_status = postgresql.ENUM(
-        "pending", "in_progress", "completed", "dismissed", name="revalidation_status"
-    )
-    revalidation_status.create(op.get_bind())
-
-    signal_source_type = postgresql.ENUM(
-        "override", "reviewer_comment", "external_feedback", name="signal_source_type"
-    )
-    signal_source_type.create(op.get_bind())
-
-    signal_severity = postgresql.ENUM("high", "medium", "low", name="signal_severity")
-    signal_severity.create(op.get_bind())
-
-    recommendation_status = postgresql.ENUM(
-        "pending", "approved", "rejected", name="recommendation_status"
-    )
-    recommendation_status.create(op.get_bind())
-
-    job_queue_status = postgresql.ENUM(
-        "pending", "running", "completed", "failed", name="job_queue_status"
-    )
-    job_queue_status.create(op.get_bind())
-
     # ── organisations ─────────────────────────────────────────────────────────
     op.create_table(
         "organisations",
@@ -599,11 +518,11 @@ def upgrade() -> None:
     $$ LANGUAGE plpgsql;
     """)
 
+    op.execute("DROP TRIGGER IF EXISTS trg_block_audit_mutation ON audit_events")
     op.execute("""
-    DROP TRIGGER IF EXISTS trg_block_audit_mutation ON audit_events;
     CREATE TRIGGER trg_block_audit_mutation
     BEFORE UPDATE OR DELETE ON audit_events
-    FOR EACH ROW EXECUTE FUNCTION block_audit_mutation();
+    FOR EACH ROW EXECUTE FUNCTION block_audit_mutation()
     """)
 
 

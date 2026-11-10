@@ -18,7 +18,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("", response_model=UserList)
 async def list_users(
     db: DbDep,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_role(UserRole.administrator, UserRole.brand_manager)),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> UserList:

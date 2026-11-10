@@ -14,7 +14,12 @@ from app.services.auth import JWTError, decode_access_token, get_user_by_id
 
 async def get_async_session():
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 bearer_scheme = HTTPBearer(auto_error=False)
 

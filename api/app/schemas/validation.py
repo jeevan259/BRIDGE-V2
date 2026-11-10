@@ -22,6 +22,7 @@ class ValidationJobResponse(BaseModel):
     content_title: str | None
     status: JobStatus
     ai_provider_used: str | None
+    fallback_used: bool
     created_at: datetime
     completed_at: datetime | None
     error_message: str | None

@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.base import LLMResponse
 from app.ai.gemini import get_embedding_provider, get_llm_provider
+from app.core.config import settings
 from app.models.knowledge import ItemStatus, ItemType, ItemVersion, KnowledgeItem, Passage
+from app.models.organisation import Organisation
 from app.models.validation import (
     EvidenceReceipt,
     Finding,
@@ -281,13 +283,27 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
     # ───────────────────────────────────────────────────────────────────────────
     # STAGE 2: Retrieval-Grounded AI & Server-Side Citation Resolution
     # ───────────────────────────────────────────────────────────────────────────
+    context_passages = all_passages
+    embedding_fallback_used = False
+    tenant = await db.get(Organisation, org_id)
+    if tenant and tenant.embedding_provider == "gemini" and settings.ai_provider.lower() == "gemini":
+        embedding_result = await get_embedding_provider().embed([content])
+        embedding_fallback_used = embedding_result.fallback_used
+        if embedding_result.provider == "gemini" and embedding_result.dimensions == 768:
+            ranked = await db.execute(
+                select(Passage)
+                .where(Passage.org_id == org_id, Passage.embedding_vector.is_not(None))
+                .order_by(Passage.embedding_vector.cosine_distance(embedding_result.embeddings[0]))
+                .limit(5)
+            )
+            context_passages = ranked.scalars().all()
+
     llm = get_llm_provider()
-    job.ai_provider_used = llm.provider_name
 
     # Prepare verified passage context for AI
     context_snippets = [
         f"[Passage {p.id}] Source {p.source_id}: {p.text[:300]}"
-        for p in all_passages[:5]
+        for p in context_passages[:5]
     ]
     system_prompt = (
         "You are the BRIDGE Brand Compliance Validator. "
@@ -299,36 +315,33 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
     )
 
     llm_resp: LLMResponse = await llm.complete(system=system_prompt, user=user_prompt)
+    job.ai_provider_used = llm_resp.provider
+    job.fallback_used = embedding_fallback_used or llm_resp.fallback_used
 
     # RULE 4: Server-Side Citation Resolution (Hallucination Trap Detection)
     # Detect if the LLM attempted to cite non-existent UUIDs or fake items
     cited_uuids = re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", llm_resp.content, re.IGNORECASE)
 
-    for candidate_uuid_str in cited_uuids:
-        try:
-            cand_uuid = uuid.UUID(candidate_uuid_str)
-        except ValueError:
-            continue
-
-        # Check if this resolves to a real approved ItemVersion or Passage in this org
+    candidate_uuids = {uuid.UUID(value) for value in cited_uuids}
+    if candidate_uuids:
         item_ver_res = await db.execute(
-            select(ItemVersion)
+            select(ItemVersion.id)
             .join(KnowledgeItem, KnowledgeItem.id == ItemVersion.item_id)
             .where(
-                ItemVersion.id == cand_uuid,
+                ItemVersion.id.in_(candidate_uuids),
                 KnowledgeItem.org_id == org_id,
                 ItemVersion.status == ItemStatus.approved,
             )
         )
-        resolved_version = item_ver_res.scalar_one_or_none()
-
+        valid_version_ids = set(item_ver_res.scalars().all())
         passage_res = await db.execute(
-            select(Passage).where(Passage.id == cand_uuid, Passage.org_id == org_id)
+            select(Passage.id).where(Passage.id.in_(candidate_uuids), Passage.org_id == org_id)
         )
-        resolved_passage = passage_res.scalar_one_or_none()
+        valid_passage_ids = set(passage_res.scalars().all())
 
-        # If it DOES NOT resolve to an approved record in this org:
-        if not resolved_version and not resolved_passage:
+        for candidate_uuid in candidate_uuids:
+            if candidate_uuid in valid_version_ids or candidate_uuid in valid_passage_ids:
+                continue
             # Hallucination Trap Triggered!
             unsupported_finding = Finding(
                 job_id=job.id,
@@ -336,7 +349,7 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
                 finding_type=FindingType.unsupported,
                 severity=FindingSeverity.medium,
                 description=(
-                    f"[HALLUCINATION TRAP TRIGGERED] AI claimed citation to nonexistent source ({candidate_uuid_str}). "
+                    f"[HALLUCINATION TRAP TRIGGERED] AI claimed citation to nonexistent source ({candidate_uuid}). "
                     f"Server citation resolver stripped invalid citation — finding classified as UNSUPPORTED."
                 ),
                 is_evidence_backed=False,
@@ -354,6 +367,7 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
         "job_id": str(job.id),
         "status": "completed",
         "findings_count": len(findings_created),
-        "ai_provider": llm.provider_name,
+        "ai_provider": llm_resp.provider,
+        "fallback_used": job.fallback_used,
     }
 

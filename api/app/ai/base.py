@@ -11,6 +11,8 @@ class LLMResponse:
     provider: str
     model: str
     is_mock: bool = False
+    fallback_used: bool = False
+    fallback_error: str | None = None
 
 
 @dataclass
@@ -19,6 +21,8 @@ class EmbeddingResponse:
     provider: str
     is_offline: bool = False
     dimensions: int = 384
+    model: str = "hash-embedding-v1"
+    fallback_used: bool = False
 
 
 class LLMProvider(ABC):

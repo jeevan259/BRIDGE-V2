@@ -40,6 +40,17 @@ async def login(
     access_token = create_access_token({"sub": str(user.id), "org": str(user.org_id)})
     raw_refresh, _ = await create_refresh_token_record(db, user.id)
 
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=user.org_id,
+        event_type="AUTH_LOGIN_SUCCESS",
+        actor=user,
+        resource_type="user",
+        resource_id=str(user.id),
+        diff_json={"role": user.role.value},
+    )
+
     response.set_cookie(
         key=_COOKIE_NAME,
         value=raw_refresh,
@@ -102,11 +113,21 @@ async def logout(
         record = await get_valid_refresh_token(db, bridge_refresh_token)
         if record:
             await revoke_refresh_token(db, record, revoked_by=current_user.id)
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="AUTH_LOGOUT",
+        actor=current_user,
+        resource_type="user",
+        resource_id=str(current_user.id),
+    )
     response.delete_cookie(
         key=_COOKIE_NAME,
         path="/api/v1/auth",
         domain=settings.cookie_domain,
     )
+    response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
 

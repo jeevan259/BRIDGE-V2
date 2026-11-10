@@ -46,58 +46,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.user import RefreshToken, User, UserRole
+from app.models.user import RefreshToken, User
 
 import logging
 logger = logging.getLogger(__name__)
-
-_DEMO_ORG_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
-_DEMO_USERS: dict[str, dict[str, Any]] = {
-    "admin@bridge.local": {
-        "id": uuid.UUID("00000000-0000-0000-0000-000000000001"),
-        "full_name": "Alexander Vance",
-        "role": UserRole.administrator,
-    },
-    "brand_manager@bridge.local": {
-        "id": uuid.UUID("00000000-0000-0000-0000-000000000002"),
-        "full_name": "Elena Rostova",
-        "role": UserRole.brand_manager,
-    },
-    "reviewer@bridge.local": {
-        "id": uuid.UUID("00000000-0000-0000-0000-000000000003"),
-        "full_name": "Marcus Chen",
-        "role": UserRole.reviewer,
-    },
-    "creator@bridge.local": {
-        "id": uuid.UUID("00000000-0000-0000-0000-000000000004"),
-        "full_name": "Sophia Patel",
-        "role": UserRole.creator,
-    },
-    "auditor@bridge.local": {
-        "id": uuid.UUID("00000000-0000-0000-0000-000000000005"),
-        "full_name": "David Kross",
-        "role": UserRole.auditor,
-    },
-}
-
-
-def get_demo_fallback_user(email: str | None = None, user_id: uuid.UUID | None = None) -> User | None:
-    now = datetime.now(timezone.utc)
-    for demo_email, info in _DEMO_USERS.items():
-        if (email and demo_email.lower() == email.lower()) or (user_id and info["id"] == user_id):
-            return User(
-                id=info["id"],
-                org_id=_DEMO_ORG_ID,
-                email=demo_email,
-                hashed_password=hash_password("password123"),
-                full_name=info["full_name"],
-                role=info["role"],
-                is_active=True,
-                created_at=now,
-                updated_at=now,
-            )
-    return None
-
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
@@ -156,37 +108,24 @@ async def get_user_by_email(db: AsyncSession, email: str, org_id: uuid.UUID) -> 
 
 
 async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
-    try:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if user:
-            return user
-    except Exception as exc:
-        logger.warning("Database query failed in get_user_by_id, falling back to demo users: %s", exc)
-    return get_demo_fallback_user(user_id=user_id)
+    result = await db.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
 
 
 async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
     """Find user by email across all orgs, verify password."""
-    try:
-        result = await db.execute(
-            select(User).where(User.email == email, User.is_active == True)  # noqa: E712
-        )
-        user = result.scalar_one_or_none()
-        if user and verify_password(password, user.hashed_password):
-            return user
-    except Exception as exc:
-        logger.warning("Database query failed in authenticate_user, falling back to demo users: %s", exc)
-
-    demo_user = get_demo_fallback_user(email=email)
-    if demo_user and (password == "password123" or verify_password(password, demo_user.hashed_password)):
-        return demo_user
+    result = await db.execute(
+        select(User).where(User.email == email, User.is_active == True)  # noqa: E712
+    )
+    user = result.scalar_one_or_none()
+    if user and verify_password(password, user.hashed_password):
+        return user
     return None
 
 
 async def create_refresh_token_record(
     db: AsyncSession, user_id: uuid.UUID
-) -> tuple[str, RefreshToken | None]:
+) -> tuple[str, RefreshToken]:
     """Create and persist a RefreshToken. Returns (raw_token, record)."""
     raw, token_hash = generate_refresh_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
@@ -196,13 +135,9 @@ async def create_refresh_token_record(
         expires_at=expires_at,
         created_at=datetime.now(timezone.utc),
     )
-    try:
-        db.add(record)
-        await db.flush()
-        return raw, record
-    except Exception as exc:
-        logger.warning("Database unavailable when creating refresh token record: %s", exc)
-        return raw, None
+    db.add(record)
+    await db.flush()
+    return raw, record
 
 
 async def get_valid_refresh_token(db: AsyncSession, raw_token: str) -> RefreshToken | None:

@@ -11,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
@@ -139,6 +140,7 @@ class Passage(UUIDMixin, Base):
     char_start: Mapped[int] = mapped_column(Integer, nullable=False)
     char_end: Mapped[int] = mapped_column(Integer, nullable=False)
     embedding_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    embedding_vector: Mapped[list[float] | None] = mapped_column("embedding", Vector(768), nullable=True)
 
     # Relationships
     version: Mapped["SourceVersion"] = relationship("SourceVersion", back_populates="passages")

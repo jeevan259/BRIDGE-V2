@@ -111,6 +111,7 @@ class ValidationJob(UUIDMixin, Base):
         Enum(JobStatus, name="job_status"), nullable=False, default=JobStatus.pending
     )
     ai_provider_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    fallback_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     rule_set_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
