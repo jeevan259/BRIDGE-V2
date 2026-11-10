@@ -17,6 +17,16 @@
 | **Phase 5** | Deploy (Backend Dockerfile, Vercel frontend rewrite, DEPLOY.md, smoke.sh) | **ready-for-deploy** | `/health` does not call the database; Docker runs as non-root, uses Render's `$PORT`, and startup runs Alembic before Uvicorn; `start.sh` is LF. Frontend build and API Python syntax compile pass. Frontend retries network errors/timeouts for up to 90 seconds and shows “Waking up the server...”. `DEPLOY.md` contains Render/Vercel variables and setup clicks. **Exact next step:** deploy the backend and frontend using `DEPLOY.md`, then run `bash scripts/smoke.sh <backend-url> <frontend-url>`. |
 | **Phase 6** | Verification & Submission Pack (Browser run, docs/FEATURES.md, TECH.md, CHANGES.md, ROUND3.md, README.md, PDF) | **TODO** | Starts after Phase 5 is DONE. |
 
+## Continuation Tasks (2026-11-10)
+
+| Step | Status | Evidence | Exact next step |
+|---|---|---|---|
+| 1. Prove Live AI | IN PROGRESS | `.env` key presence checked as boolean only: `GEMINI_API_KEY configured: True`. The configured model was updated from the retired `gemini-1.5-flash` to free-tier Flash `gemini-3.8-flash`. Redacted ASGI probe output: `redacted_error=Gemini status probe timed out (22s)`. No live validation was run. | Re-run `/api/v1/ai/status` and the violating-sample validation when outbound Gemini requests complete; retain only redacted output. |
+| 2. Quota-Safe Validation | TODO | — | Implement content+guideline-version caching, per-user 5 AI checks/hour, input cap, deterministic limited mode, seeded-passage prompt context, and vector isolation. |
+| 3. Tamper Demo | TODO | — | Add verification UI and DEMO_MODE admin tamper/untamper operations without changing the database trigger. |
+| 4. Blast Radius | TODO | — | Verify clearspace rule impact and revalidation queue output; fix if below target. |
+| 5. Full Suite | TODO | — | Run the full test suite once, record redacted raw result, update this log, and commit. |
+
 ---
 
 ## Phase 4 Evidence & Acceptance Checks

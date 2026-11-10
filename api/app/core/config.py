@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # AI Provider
     ai_provider: str = "mock"  # gemini | mock | adversarial
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_embedding_model: str = "text-embedding-004"
     gemini_embedding_dimensions: int = 768
 
