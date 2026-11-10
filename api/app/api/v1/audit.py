@@ -1,11 +1,12 @@
 """Audit log endpoints — read-only, verify chain."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 
-from app.api.deps import CurrentUser, DbDep
+from app.api.deps import CurrentUser, DbDep, require_role
 from app.models.audit import AuditEvent
+from app.models.user import User, UserRole
 from app.schemas.audit import AuditEventList, AuditEventResponse, AuditVerifyResponse
 from app.services.audit import verify_audit_chain
 
@@ -15,7 +16,9 @@ router = APIRouter(prefix="/audit", tags=["audit"])
 @router.get("/events", response_model=AuditEventList)
 async def list_audit_events(
     db: DbDep,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_role(
+        UserRole.administrator, UserRole.brand_manager, UserRole.reviewer, UserRole.auditor
+    )),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     event_type: str | None = Query(None),
@@ -42,7 +45,9 @@ async def list_audit_events(
 @router.get("/verify", response_model=AuditVerifyResponse)
 async def verify_chain(
     db: DbDep,
-    current_user: CurrentUser,
+    current_user: User = Depends(require_role(
+        UserRole.administrator, UserRole.brand_manager, UserRole.auditor
+    )),
 ) -> AuditVerifyResponse:
     """Verify the integrity of the hash chain for the current org."""
     result = await verify_audit_chain(db, current_user.org_id)

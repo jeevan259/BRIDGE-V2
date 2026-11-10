@@ -69,6 +69,17 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="USER_CREATED",
+        actor=current_user,
+        resource_type="user",
+        resource_id=str(user.id),
+        diff_json={"email": user.email, "role": user.role.value},
+    )
     return UserResponse.model_validate(user)
 
 
@@ -108,4 +119,15 @@ async def update_user(
     if body.is_active is not None:
         user.is_active = body.is_active
     await db.flush()
+
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="USER_UPDATED",
+        actor=current_user,
+        resource_type="user",
+        resource_id=str(user.id),
+        diff_json={"role": user.role.value, "is_active": user.is_active},
+    )
     return UserResponse.model_validate(user)

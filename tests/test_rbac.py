@@ -112,3 +112,31 @@ def test_brand_manager_permissions():
         assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
 
     asyncio.run(_run())
+
+
+def test_audit_log_rbac_permissions():
+    """Auditor, Admin, Reviewer can view audit log; Creator is denied."""
+    async def _run():
+        creator = _make_user(UserRole.creator)
+        auditor = _make_user(UserRole.auditor)
+        admin = _make_user(UserRole.administrator)
+
+        audit_view_checker = require_role(
+            UserRole.administrator, UserRole.brand_manager, UserRole.reviewer, UserRole.auditor
+        )
+        assert await audit_view_checker(auditor) == auditor
+        assert await audit_view_checker(admin) == admin
+
+        with pytest.raises(HTTPException) as exc_info:
+            await audit_view_checker(creator)
+        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+        verify_checker = require_role(
+            UserRole.administrator, UserRole.brand_manager, UserRole.auditor
+        )
+        assert await verify_checker(auditor) == auditor
+        with pytest.raises(HTTPException) as exc_info:
+            await verify_checker(creator)
+        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+
+    asyncio.run(_run())

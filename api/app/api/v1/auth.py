@@ -44,8 +44,9 @@ async def login(
         key=_COOKIE_NAME,
         value=raw_refresh,
         httponly=True,
-        secure=not settings.is_development,
-        samesite="strict",
+        secure=settings.is_cookie_secure,
+        samesite=settings.resolved_cookie_samesite,
+        domain=settings.cookie_domain,
         max_age=_COOKIE_MAX_AGE,
         path="/api/v1/auth",
     )
@@ -81,8 +82,9 @@ async def refresh_token(
         key=_COOKIE_NAME,
         value=raw_refresh,
         httponly=True,
-        secure=not settings.is_development,
-        samesite="strict",
+        secure=settings.is_cookie_secure,
+        samesite=settings.resolved_cookie_samesite,
+        domain=settings.cookie_domain,
         max_age=_COOKIE_MAX_AGE,
         path="/api/v1/auth",
     )
@@ -100,7 +102,11 @@ async def logout(
         record = await get_valid_refresh_token(db, bridge_refresh_token)
         if record:
             await revoke_refresh_token(db, record, revoked_by=current_user.id)
-    response.delete_cookie(key=_COOKIE_NAME, path="/api/v1/auth")
+    response.delete_cookie(
+        key=_COOKIE_NAME,
+        path="/api/v1/auth",
+        domain=settings.cookie_domain,
+    )
     return response
 
 
