@@ -129,14 +129,17 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
                 db.add(receipt)
                 findings_created.append(finding)
 
-        # Check 2: Modesty / hyperbolic buzzwords ("synergistic disruption", "revolutionary")
+        # Check 2: Modesty / hyperbolic buzzwords ("synergistic disruption", "revolutionary", "world's best gear")
         if "modest" in v_content or "hyperbole" in v_content or "superlative" in v_content or "buzzword" in v_content:
-            buzzwords = ["synergistic disruption", "revolutionary", "completely disrupt", "unrivaled"]
+            buzzwords = [
+                "synergistic disruption", "revolutionary", "completely disrupt",
+                "unrivaled", "world's best gear", "disruptive transformation"
+            ]
             matched_buzzwords = [bw for bw in buzzwords if bw in content_lower]
             if matched_buzzwords:
                 quote = ", ".join(matched_buzzwords)
                 passage = next(
-                    (p for p in passages_by_source.get(item.source_id, []) if "tone" in p.text.lower() or "voice" in p.text.lower()),
+                    (p for p in passages_by_source.get(item.source_id, []) if "tone" in p.text.lower() or "voice" in p.text.lower() or "buzzword" in p.text.lower()),
                     None,
                 )
                 finding = Finding(
@@ -145,7 +148,7 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
                     finding_type=FindingType.tone_issue,
                     severity=FindingSeverity.medium,
                     description=(
-                        f"Tone Guidance Breach: Content uses prohibited hype buzzwords ({quote}) "
+                        f"Tone Guidance Breach: Content uses prohibited sales buzzwords/superlatives ({quote}) "
                         f"violating '{item.title}' which mandates measured, technical modesty."
                     ),
                     is_evidence_backed=True,
@@ -183,6 +186,207 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
                 )
                 db.add(receipt)
                 findings_created.append(finding)
+
+        # Check 2b: Greenwashing & Environmental Stewardship (eco-friendly, green for mother earth)
+        if "stewardship" in v_content or "environment" in v_content or "green" in v_content:
+            green_phrases = ["eco-friendly", "green for mother earth", "zero-waste movement"]
+            matched_green = [gp for gp in green_phrases if gp in content_lower]
+            if matched_green:
+                quote = ", ".join(matched_green)
+                passage = next(
+                    (p for p in passages_by_source.get(item.source_id, []) if "stewardship" in p.text.lower() or "greenwashing" in p.text.lower() or "recycled" in p.text.lower()),
+                    None,
+                )
+                finding = Finding(
+                    job_id=job.id,
+                    org_id=org_id,
+                    finding_type=FindingType.guideline_breach,
+                    severity=FindingSeverity.high,
+                    description=(
+                        f"Unsubstantiated Environmental Claim: '{quote}' violates rule requiring accredited "
+                        f"certifications (e.g. GRS certified) and prohibiting vague greenwashing terminology."
+                    ),
+                    is_evidence_backed=True,
+                    status=FindingStatus.pending,
+                )
+                db.add(finding)
+                await db.flush()
+
+                citation = FindingCitation(
+                    finding_id=finding.id,
+                    item_version_id=version.id,
+                    passage_id=passage.id if passage else None,
+                    exact_quote=quote,
+                    passage_text_at_citation=passage.text if passage else version.content,
+                )
+                db.add(citation)
+                await db.flush()
+
+                receipt = EvidenceReceipt(
+                    finding_id=finding.id,
+                    generated_at=datetime.now(timezone.utc),
+                    receipt_json={
+                        "receipt_id": str(uuid.uuid4()),
+                        "rule_grounding_type": "deterministic",
+                        "finding_type": FindingType.guideline_breach.value,
+                        "item_id": str(item.id),
+                        "item_title": item.title,
+                        "item_version_number": version.version_number,
+                        "passage_id": str(passage.id) if passage else None,
+                        "exact_quote": quote,
+                        "passage_snapshot": passage.text if passage else version.content,
+                        "verified_by": "BRIDGE Stewardship Standards Verifier",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                db.add(receipt)
+                findings_created.append(finding)
+
+        # Check 2c: Brand Philosophy (conquer nature)
+        if "conquer nature" in content_lower:
+            quote = "conquer nature"
+            passage = next(
+                (p for p in passages_by_source.get(item.source_id, []) if "nature" in p.text.lower() or "companion" in p.text.lower()),
+                None,
+            )
+            finding = Finding(
+                job_id=job.id,
+                org_id=org_id,
+                finding_type=FindingType.tone_issue,
+                severity=FindingSeverity.medium,
+                description="Brand Philosophy Breach: Aurora celebrates nature as a companion, not an adversary to conquer.",
+                is_evidence_backed=True,
+                status=FindingStatus.pending,
+            )
+            db.add(finding)
+            await db.flush()
+
+            citation = FindingCitation(
+                finding_id=finding.id,
+                item_version_id=version.id,
+                passage_id=passage.id if passage else None,
+                exact_quote=quote,
+                passage_text_at_citation=passage.text if passage else version.content,
+            )
+            db.add(citation)
+            await db.flush()
+
+            receipt = EvidenceReceipt(
+                finding_id=finding.id,
+                generated_at=datetime.now(timezone.utc),
+                receipt_json={
+                    "receipt_id": str(uuid.uuid4()),
+                    "rule_grounding_type": "deterministic",
+                    "finding_type": FindingType.tone_issue.value,
+                    "item_id": str(item.id),
+                    "item_title": item.title,
+                    "item_version_number": version.version_number,
+                    "passage_id": str(passage.id) if passage else None,
+                    "exact_quote": quote,
+                    "passage_snapshot": passage.text if passage else version.content,
+                    "verified_by": "BRIDGE Brand Philosophy Engine",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            db.add(receipt)
+            findings_created.append(finding)
+
+        # Check 2d: Packaging & Material Standards (plastic zip-ties, 100% risk-free)
+        if "plastic zip-ties" in content_lower:
+            quote = "plastic zip-ties"
+            passage = next(
+                (p for p in passages_by_source.get(item.source_id, []) if "hangtag" in p.text.lower() or "zip-ties" in p.text.lower() or "packaging" in p.text.lower()),
+                None,
+            )
+            finding = Finding(
+                job_id=job.id,
+                org_id=org_id,
+                finding_type=FindingType.brand_violation,
+                severity=FindingSeverity.high,
+                description="Packaging Material Breach: Plastic zip-ties are banned on all Aurora apparel and gear hangtags.",
+                is_evidence_backed=True,
+                status=FindingStatus.pending,
+            )
+            db.add(finding)
+            await db.flush()
+
+            citation = FindingCitation(
+                finding_id=finding.id,
+                item_version_id=version.id,
+                passage_id=passage.id if passage else None,
+                exact_quote=quote,
+                passage_text_at_citation=passage.text if passage else version.content,
+            )
+            db.add(citation)
+            await db.flush()
+
+            receipt = EvidenceReceipt(
+                finding_id=finding.id,
+                generated_at=datetime.now(timezone.utc),
+                receipt_json={
+                    "receipt_id": str(uuid.uuid4()),
+                    "rule_grounding_type": "deterministic",
+                    "finding_type": FindingType.brand_violation.value,
+                    "item_id": str(item.id),
+                    "item_title": item.title,
+                    "item_version_number": version.version_number,
+                    "passage_id": str(passage.id) if passage else None,
+                    "exact_quote": quote,
+                    "passage_snapshot": passage.text if passage else version.content,
+                    "verified_by": "BRIDGE Packaging Material Inspector",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            db.add(receipt)
+            findings_created.append(finding)
+
+        if "100% risk-free" in content_lower:
+            quote = "100% risk-free"
+            passage = next(
+                (p for p in passages_by_source.get(item.source_id, []) if "disclaimer" in p.text.lower() or "risk" in p.text.lower()),
+                None,
+            )
+            finding = Finding(
+                job_id=job.id,
+                org_id=org_id,
+                finding_type=FindingType.brand_violation,
+                severity=FindingSeverity.high,
+                description="Deceptive Safety Claim: '100% risk-free' contradicts mandatory outdoor safety reality disclosures.",
+                is_evidence_backed=True,
+                status=FindingStatus.pending,
+            )
+            db.add(finding)
+            await db.flush()
+
+            citation = FindingCitation(
+                finding_id=finding.id,
+                item_version_id=version.id,
+                passage_id=passage.id if passage else None,
+                exact_quote=quote,
+                passage_text_at_citation=passage.text if passage else version.content,
+            )
+            db.add(citation)
+            await db.flush()
+
+            receipt = EvidenceReceipt(
+                finding_id=finding.id,
+                generated_at=datetime.now(timezone.utc),
+                receipt_json={
+                    "receipt_id": str(uuid.uuid4()),
+                    "rule_grounding_type": "deterministic",
+                    "finding_type": FindingType.brand_violation.value,
+                    "item_id": str(item.id),
+                    "item_title": item.title,
+                    "item_version_number": version.version_number,
+                    "passage_id": str(passage.id) if passage else None,
+                    "exact_quote": quote,
+                    "passage_snapshot": passage.text if passage else version.content,
+                    "verified_by": "BRIDGE Safety Claim Scanner",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            db.add(receipt)
+            findings_created.append(finding)
 
         # Check 3: Verified Factual Claims (SLA 99.995%, 70% reduction)
         if item.item_type in (ItemType.fact, ItemType.claim):

@@ -10,10 +10,11 @@ from sqlalchemy import func, select
 from app.api.deps import CurrentUser, DbDep, require_role
 from app.models.user import User, UserRole
 from app.models.validation import (
-    EvidenceReceipt, Finding, FindingCitation, FindingStatus, ValidationJob
+    EvidenceReceipt, Finding, FindingCitation, FindingStatus, FindingType, ValidationJob
 )
 from app.schemas.validation import (
     CitationResponse, EvidenceReceiptResponse, FindingList, FindingOverride, FindingResponse,
+    JobDecisionRequest, JobDecisionResponse,
     ValidationJobCreate, ValidationJobList, ValidationJobResponse,
 )
 from app.services.jobs import enqueue_job
@@ -118,20 +119,22 @@ async def list_job_findings(
         Finding.finding_type != FindingType.unsupported,
         Finding.is_evidence_backed == True,
     ]
+    p = page if isinstance(page, int) else int(getattr(page, "default", 1))
+    ps = page_size if isinstance(page_size, int) else int(getattr(page_size, "default", 20))
     total = (await db.execute(
         select(func.count()).select_from(Finding).where(*base_filter)
     )).scalar_one()
-    offset = (page - 1) * page_size
+    offset = (p - 1) * ps
     result = await db.execute(
         select(Finding)
         .where(*base_filter)
         .order_by(Finding.severity.desc())
-        .offset(offset).limit(page_size)
+        .offset(offset).limit(ps)
     )
     findings = result.scalars().all()
     return FindingList(
         items=[FindingResponse.model_validate(f) for f in findings],
-        total=total, page=page, page_size=page_size,
+        total=total, page=p, page_size=ps,
     )
 
 
@@ -149,20 +152,22 @@ async def list_job_hallucination_defense(
         Finding.org_id == current_user.org_id,
         (Finding.finding_type == FindingType.unsupported) | (Finding.is_evidence_backed == False),
     ]
+    p = page if isinstance(page, int) else int(getattr(page, "default", 1))
+    ps = page_size if isinstance(page_size, int) else int(getattr(page_size, "default", 20))
     total = (await db.execute(
         select(func.count()).select_from(Finding).where(*defense_filter)
     )).scalar_one()
-    offset = (page - 1) * page_size
+    offset = (p - 1) * ps
     result = await db.execute(
         select(Finding)
         .where(*defense_filter)
         .order_by(Finding.severity.desc())
-        .offset(offset).limit(page_size)
+        .offset(offset).limit(ps)
     )
     findings = result.scalars().all()
     return FindingList(
         items=[FindingResponse.model_validate(f) for f in findings],
-        total=total, page=page, page_size=page_size,
+        total=total, page=p, page_size=ps,
     )
 
 
@@ -181,20 +186,22 @@ async def list_org_hallucination_defense(
     ]
     if job_id:
         defense_filter.append(Finding.job_id == job_id)
+    p = page if isinstance(page, int) else int(getattr(page, "default", 1))
+    ps = page_size if isinstance(page_size, int) else int(getattr(page_size, "default", 20))
     total = (await db.execute(
         select(func.count()).select_from(Finding).where(*defense_filter)
     )).scalar_one()
-    offset = (page - 1) * page_size
+    offset = (p - 1) * ps
     result = await db.execute(
         select(Finding)
         .where(*defense_filter)
         .order_by(Finding.severity.desc())
-        .offset(offset).limit(page_size)
+        .offset(offset).limit(ps)
     )
     findings = result.scalars().all()
     return FindingList(
         items=[FindingResponse.model_validate(f) for f in findings],
-        total=total, page=page, page_size=page_size,
+        total=total, page=p, page_size=ps,
     )
 
 
@@ -290,3 +297,47 @@ async def get_finding_evidence(
         select(EvidenceReceipt).where(EvidenceReceipt.finding_id == finding_id)
     )
     return [EvidenceReceiptResponse.model_validate(r) for r in result.scalars().all()]
+
+
+@router.post("/jobs/{job_id}/decide", response_model=JobDecisionResponse)
+async def decide_validation_job(
+    job_id: uuid.UUID,
+    body: JobDecisionRequest,
+    db: DbDep,
+    current_user: User = Depends(require_role(
+        UserRole.administrator, UserRole.brand_manager, UserRole.reviewer
+    )),
+) -> JobDecisionResponse:
+    """Record final human compliance decision (Approve / Request Changes) with cryptographic audit trail."""
+    job = (await db.execute(
+        select(ValidationJob).where(
+            ValidationJob.id == job_id, ValidationJob.org_id == current_user.org_id
+        )
+    )).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    now = datetime.now(timezone.utc)
+    from app.services.audit import append_audit_event
+    await append_audit_event(
+        db,
+        org_id=current_user.org_id,
+        event_type="VALIDATION_JOB_DECIDED",
+        actor=current_user,
+        resource_type="validation_job",
+        resource_id=str(job.id),
+        diff_json={
+            "decision": body.decision,
+            "notes": body.notes,
+            "decided_by": current_user.email,
+            "decided_at": now.isoformat(),
+        },
+    )
+
+    return JobDecisionResponse(
+        job_id=job.id,
+        decision=body.decision,
+        decided_by=current_user.email,
+        decided_at=now,
+        notes=body.notes,
+    )

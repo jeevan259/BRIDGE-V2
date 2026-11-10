@@ -53,3 +53,4 @@ def test_quarantined_hallucinations_isolated_from_normal_findings():
     assert normal_results[0].id == valid_finding.id
     assert len(defense_results) == 1
     assert defense_results[0].id == quarantined_finding.id
+

@@ -91,3 +91,4 @@ def test_cleanup_stale_guests_spares_seeded():
     assert len(stale_guests) == 1
     assert stale_guests[0].id == guest_user.id
     assert seeded_user.id not in [u.id for u in stale_guests]
+

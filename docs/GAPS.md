@@ -10,9 +10,9 @@
 | Category | Total Identified | Fixed in Baseline (<5 min) | Remaining / Backlog |
 |---|:---:|:---:|:---:|
 | **Environment Variables** | 7 | 7 | 0 |
-| **RBAC Enforcement** | 4 | 2 | 2 (Read Scoping) |
-| **Audit Events on State Mutation** | 12 | 10 | 2 (Auth events) |
-| **N+1 Query Patterns** | 3 | 0 | 3 (Refactoring) |
+| **RBAC Enforcement** | 4 | 4 | 0 |
+| **Audit Events on State Mutation** | 14 | 14 | 0 |
+| **N+1 Query Patterns** | 3 | 1 | 2 (remaining performance work) |
 | **Hardcoded URLs / Ports** | 5 | 3 | 2 (Alembic default) |
 
 ---
@@ -36,9 +36,9 @@
 - [x] **`GET /api/v1/audit/events`**: Previously accessible to any authenticated user (including `creator`). Now explicitly restricted via `require_role(administrator, brand_manager, reviewer, auditor)`. Verified via new test `test_audit_log_rbac_permissions`.
 - [x] **`GET /api/v1/audit/verify`**: Previously accessible to all roles. Now restricted via `require_role(administrator, brand_manager, auditor)`. Verified via test.
 
-### Remaining Items with Severity
-- **Severity: Low** — `GET /api/v1/users`: Any authenticated user in the tenant can currently list other tenant users. In strict least-privilege configurations, this should be restricted to `administrator` and `brand_manager`, while creators only query assignee endpoints.
-- **Severity: Low** — `GET /api/v1/continuity/edges`: Creators can view all dependency edges. Recommended to keep visible for transparency, or scope by creator's own submitted assets.
+### Resolved in this branch
+- `GET /api/v1/users` is restricted to `administrator` and `brand_manager`.
+- `GET /api/v1/continuity/edges` is restricted to non-creator roles.
 
 ---
 
@@ -60,9 +60,9 @@ Every state mutation in an ISO 27001 / tamper-evident compliance system must pro
 - [x] **`POST /api/v1/organisations`** (`create_organisation`): Added `ORGANISATION_CREATED` audit event.
 - [x] **`PATCH /api/v1/organisations/{org_id}`** (`update_organisation`): Added `ORGANISATION_UPDATED` audit event.
 
-### Remaining Items with Severity
-- **Severity: Medium** — `POST /api/v1/auth/login`: Authentication successes create a refresh token record in the DB without creating an immutable security audit event `AUTH_LOGIN_SUCCESS`. (Should capture actor IP, user agent, timestamp).
-- **Severity: Low** — `POST /api/v1/auth/logout`: Revocation of refresh tokens does not generate an `AUTH_LOGOUT` audit record.
+### Resolved in this branch
+- `POST /api/v1/auth/login` appends `AUTH_LOGIN_SUCCESS` to the tenant audit chain.
+- `POST /api/v1/auth/logout` appends `AUTH_LOGOUT` to the tenant audit chain.
 
 ---
 
@@ -70,10 +70,7 @@ Every state mutation in an ISO 27001 / tamper-evident compliance system must pro
 
 ### Identified Items with Severity
 
-- **Severity: High** — `api/app/services/validation.py` (lines 307-330):
-  - *Location*: Server-side Citation Resolution (Hallucination Trap).
-  - *Issue*: In `run_validation_pipeline`, for every candidate UUID extracted by regex from LLM output, two separate queries (`select(ItemVersion)` and `select(Passage)`) are executed sequentially.
-  - *Fix*: Batch resolve using `select(ItemVersion.id).where(ItemVersion.id.in_(cand_uuids))` and `select(Passage.id).where(Passage.id.in_(cand_uuids))`.
+- **Resolved in this branch** — `api/app/services/validation.py` citation resolution now batch-resolves candidate item-version and passage IDs in two queries instead of two queries per candidate.
 
 - **Severity: Medium** — `api/app/services/validation.py` (lines 98, 108, 127):
   - *Location*: Deterministic check findings creation.
@@ -102,5 +99,6 @@ Every state mutation in an ISO 27001 / tamper-evident compliance system must pro
 
 ## 6. Verification & Health Probes
 
-- **Liveness**: `GET /health` returns application operational status and AI provider status (`AI: offline mode` or `AI: online (Gemini 1.5)`).
+- **Liveness**: `GET /health` returns application operational status. `GET /api/v1/ai/status` returns cached provider, mode, model, and last error; Gemini status is based on a real test request.
 - **Readiness**: `GET /ready` checks live database connectivity (`SELECT 1`) and verifies the `vector` extension exists in `pg_extension`. Returns 200 OK when ready or in demo mode, and 503 Service Unavailable when degraded in production.
+

@@ -66,6 +66,19 @@ class FindingOverride(BaseModel):
     override_reason_text: str | None = None
 
 
+class JobDecisionRequest(BaseModel):
+    decision: str  # approved | changes_requested
+    notes: str | None = None
+
+
+class JobDecisionResponse(BaseModel):
+    job_id: uuid.UUID
+    decision: str
+    decided_by: str
+    decided_at: datetime
+    notes: str | None = None
+
+
 class CitationResponse(BaseModel):
     id: uuid.UUID
     finding_id: uuid.UUID
