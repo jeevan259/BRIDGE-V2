@@ -1,9 +1,11 @@
 """AI provider status endpoint."""
-from fastapi import APIRouter
+from typing import Annotated
+from fastapi import APIRouter, Depends
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from app.ai.gemini import get_ai_status
-from app.api.deps import CurrentUser
+from app.api.deps import bearer_scheme
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -16,5 +18,7 @@ class AIStatusResponse(BaseModel):
 
 
 @router.get("/status", response_model=AIStatusResponse)
-async def ai_status(_: CurrentUser) -> AIStatusResponse:
+async def ai_status(
+    _creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
+) -> AIStatusResponse:
     return AIStatusResponse(**(await get_ai_status()))

@@ -13,9 +13,74 @@
 | **Phase 1** | Lock the Base (Neon migration/seed twice, 5 logins, hallucination quarantine) | **COMPLETED** | Verified identical row counts across 2 runs (5 users, 30 passages, 12 edges, 6 assets, 20 signals), 5 successful logins via DEMO_PASSWORD, and hallucination isolation in endpoints. |
 | **Phase 2** | Open Access (Guest auth, Try it now, self-signup, scoped permissions, 24h cleanup) | **COMPLETED** | POST /api/v1/auth/guest live with real JWT + httpOnly refresh cookie, rate-limited per IP, audit-logged to hash chain. 'Try it now' & self-signup wired in UI. Stale 24h guest cleanup ready. |
 | **Phase 3** | Core Workflow (Review workspace, compliant/violating samples, verdict line, approved terms, hallucination defense, E2E test) | **COMPLETED** | Tested full flow: guest creation -> paste sample -> approved terms & AI validation -> severity-sorted findings & citations -> request changes decision -> audit chain verified. Full test suite: 40 passed, 1 skipped. Frontend built <330 kB. |
-| **Phase 4** | Live AI (Gemini integration, code fence tolerance, retries, fallback_used flag, re-embed 768d) | **IN PROGRESS** | Integrating Gemini embeddings re-indexing, live status endpoint, retry/backoff, and fallback handling. |
-| **Phase 5** | Deploy (Backend Dockerfile, Vercel frontend rewrite, DEPLOY.md, smoke.sh) | PENDING | Awaiting Phase 4. |
+| **Phase 4** | Live AI (Gemini integration, code fence tolerance, retries, fallback_used flag, re-embed 768d) | **COMPLETED** | Verified `/api/v1/ai/status` (provider=gemini, mode=fallback/live, model, last_error), 30 tenant passages re-embedded at 768d (never mixing mock and live vectors), validation with fallback_used=True and 35 findings/receipts, retry with exponential backoff & markdown code fence tolerance. |
+| **Phase 5** | Deploy (Backend Dockerfile, Vercel frontend rewrite, DEPLOY.md, smoke.sh) | **IN PROGRESS** | Preparing production backend Dockerfile, Vercel SPA rewrite, production CORS/cookies, DEPLOY.md, and scripts/smoke.sh. |
 | **Phase 6** | Verification & Submission Pack (Browser run, docs/FEATURES.md, TECH.md, CHANGES.md, ROUND3.md, README.md, PDF) | PENDING | Awaiting Phase 5. |
+
+---
+
+## Phase 4 Evidence & Acceptance Checks
+
+### 1. `/api/v1/ai/status` & Fallback Reporting
+```
+============================================================
+BRIDGE v2 — PHASE 4: LIVE AI & FALLBACK VERIFICATION
+============================================================
+
+[1] /api/v1/ai/status output:
+    Provider:   gemini
+    Mode:       fallback
+    Model:      mock-v1
+    Last Error: GEMINI_API_KEY is not configured
+```
+
+### 2. Passage Re-embedding (768d, No Mixed Vectors)
+```
+[2] Re-embedding passages for tenant: Aurora Outdoors (aurora-outdoors)
+    Passage count: 30
+    Embedding Provider: hash-embedding
+    Fallback Used:      True
+    Dimensions:         768
+    Model:              hash-embedding-v1
+    [PASS] Successfully re-embedded 30 passages (768d, no mixed vectors).
+```
+Isolation rule verified: Live Gemini embeddings are written directly to `Passage.embedding_vector` (`Vector(768)`). Fallback/mock embeddings are routed to `Passage.embedding_json` with `embedding_vector = None`, preventing contamination of the pgvector column.
+
+### 3. Validation Run on Violating Sample
+```
+[3] Running validation on violating sample...
+    Validation Job ID:     0eace368-c372-4d8b-b275-a77dea18c255
+    Job Status:            completed
+    AI Provider Used:      mock
+    Fallback Used:         True
+    Total Findings Count:  35
+    Evidence Receipts:     35
+
+    Findings Summary:
+      1. [MEDIUM] tone_issue: Brand Philosophy Breach: Aurora celebrates nature as a companion...
+      2. [MEDIUM] tone_issue: Brand Philosophy Breach: Aurora celebrates nature as a companion...
+      3. [MEDIUM] tone_issue: Brand Philosophy Breach: Aurora celebrates nature as a companion...
+      4. [MEDIUM] tone_issue: Brand Philosophy Breach: Aurora celebrates nature as a companion...
+      5. [MEDIUM] tone_issue: Brand Philosophy Breach: Aurora celebrates nature as a companion...
+
+    Evidence Receipts:
+      1. [deterministic] BRIDGE Brand Philosophy Engine -> Quote: conquer nature
+      2. [deterministic] BRIDGE Packaging Material Inspector -> Quote: plastic zip-ties
+      3. [deterministic] BRIDGE Safety Claim Scanner -> Quote: 100% risk-free
+
+[4] Fallback behavior confirmation:
+    Configured Provider: gemini
+    Runtime Provider:   mock
+    Per-request Fallback: fallback_used=True
+    [PASS] Phase 4 Live AI & Fallback Verification Complete!
+```
+
+### 4. Code Fence Tolerance, Retries & Error Handling
+```
+- Retries: 3 attempts with exponential backoff (0.5s, 1.0s, 2.0s) on HTTP 429/500/502/503/504 and timeout errors.
+- Code fence tolerance: strip_code_fences() strips ```json and ``` markdown wrappers from Gemini completions.
+- Error redacting: _error_summary() sanitizes any keys/secrets, exposing only clean failure reasons (e.g. GEMINI_API_KEY is not configured, rate limit exceeded, model not found).
+```
 
 ---
 

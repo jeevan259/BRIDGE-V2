@@ -63,11 +63,12 @@ class MockLLMProvider(LLMProvider):
 class HashEmbeddingProvider(EmbeddingProvider):
     """
     Offline deterministic embedding provider.
-    Uses consistent hashing to produce stable 384-dimensional vectors.
+    Uses consistent hashing to produce stable vectors of configurable dimension (default 384).
     is_offline=True on all responses.
     """
 
-    DIMENSIONS = 384
+    def __init__(self, dimensions: int = 384) -> None:
+        self.dimensions = dimensions
 
     @property
     def provider_name(self) -> str:
@@ -79,17 +80,16 @@ class HashEmbeddingProvider(EmbeddingProvider):
             embeddings=embeddings,
             provider=self.provider_name,
             is_offline=True,
-            dimensions=self.DIMENSIONS,
+            dimensions=self.dimensions,
             model="hash-embedding-v1",
         )
 
     def _hash_to_vector(self, text: str) -> list[float]:
         """Produce a deterministic unit-normalized vector from text."""
-        # Use SHA-512 to get enough bytes for 384 floats
+        # Use SHA-512 to get enough bytes
         digest = hashlib.sha512(text.encode("utf-8")).digest()
-        # Build 384 floats by taking pairs of bytes
         values: list[float] = []
-        for i in range(self.DIMENSIONS):
+        for i in range(self.dimensions):
             byte_idx = (i * 2) % len(digest)
             raw = struct.unpack_from("H", digest, byte_idx % (len(digest) - 1))[0]
             # Normalize to [-1, 1]
