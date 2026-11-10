@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+venvs/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+.npm/
+npm-debug.log*
+
+# Build
+web/dist/
+web/.vite/
+frontend/dist/
+frontend/.vite/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Alembic
+api/alembic/versions/__pycache__/
+backend/alembic/versions/__pycache__/
+
+# Uploads & Data
+uploads/
+/tmp/bridge_uploads/
+pgdata/
+db_data/
+
+# OS
+.DS_Store
+Thumbs.db
