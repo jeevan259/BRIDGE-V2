@@ -136,10 +136,18 @@ async def verify_audit_chain(db: AsyncSession, org_id: uuid.UUID) -> dict[str, A
     events = result.scalars().all()
 
     if not events:
-        return {"is_valid": True, "total_events": 0, "broken_at": None, "message": "No events"}
+        return {
+            "valid": True,
+            "is_valid": True,
+            "checked_count": 0,
+            "total_events": 0,
+            "first_broken_seq": None,
+            "broken_at": None,
+            "message": "Chain intact",
+        }
 
     prev_hash: str | None = None
-    for event in events:
+    for seq, event in enumerate(events, 1):
         payload = _build_hash_payload(
             event_id=event.id,
             org_id=event.org_id,
@@ -157,23 +165,32 @@ async def verify_audit_chain(db: AsyncSession, org_id: uuid.UUID) -> dict[str, A
         expected_hash = _compute_hash(_canonical_serialize(payload))
         if expected_hash != event.event_hash:
             return {
+                "valid": False,
                 "is_valid": False,
+                "checked_count": len(events),
                 "total_events": len(events),
+                "first_broken_seq": seq,
                 "broken_at": event.id,
-                "message": f"Hash mismatch at event {event.id}",
+                "message": f"Tampering detected at #{seq}",
             }
         if event.prev_hash != prev_hash:
             return {
+                "valid": False,
                 "is_valid": False,
+                "checked_count": len(events),
                 "total_events": len(events),
+                "first_broken_seq": seq,
                 "broken_at": event.id,
-                "message": f"Chain broken at event {event.id}",
+                "message": f"Tampering detected at #{seq}",
             }
         prev_hash = event.event_hash
 
     return {
+        "valid": True,
         "is_valid": True,
+        "checked_count": len(events),
         "total_events": len(events),
+        "first_broken_seq": None,
         "broken_at": None,
         "message": "Chain intact",
     }

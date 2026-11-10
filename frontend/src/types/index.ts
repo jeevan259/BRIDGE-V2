@@ -357,7 +357,10 @@ export interface AuditEventList {
 
 export interface AuditVerifyResponse {
   is_valid: boolean;
+  valid?: boolean;
   total_events: number;
+  checked_count?: number;
+  first_broken_seq?: number | null;
   broken_at: string | null;
   message: string;
 }

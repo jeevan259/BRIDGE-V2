@@ -46,7 +46,7 @@ async def list_audit_events(
 async def verify_chain(
     db: DbDep,
     current_user: User = Depends(require_role(
-        UserRole.administrator, UserRole.brand_manager, UserRole.auditor
+        UserRole.administrator, UserRole.brand_manager, UserRole.reviewer, UserRole.auditor
     )),
 ) -> AuditVerifyResponse:
     """Verify the integrity of the hash chain for the current org."""

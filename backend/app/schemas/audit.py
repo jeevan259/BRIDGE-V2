@@ -32,6 +32,15 @@ class AuditEventList(BaseModel):
 
 class AuditVerifyResponse(BaseModel):
     is_valid: bool
+    valid: bool | None = None
     total_events: int
+    checked_count: int | None = None
+    first_broken_seq: int | None = None
     broken_at: uuid.UUID | None = None
     message: str
+
+    def model_post_init(self, __context: object) -> None:
+        if self.valid is None:
+            self.valid = self.is_valid
+        if self.checked_count is None:
+            self.checked_count = self.total_events

@@ -13,7 +13,8 @@ from app.models.continuity import (
 )
 from app.models.user import User, UserRole
 from app.schemas.continuity import (
-    ChangeEventResponse, DependencyEdgeCreate, DependencyEdgeList, DependencyEdgeResponse,
+    ChangeEventResponse, ChangeSimulationResponse, ChangeApplyResponse,
+    DependencyEdgeCreate, DependencyEdgeList, DependencyEdgeResponse,
     ImpactReportResponse, RevalidationTaskList, RevalidationTaskResponse, RevalidationTaskUpdate,
     SourceChangeRequest,
 )
@@ -132,40 +133,48 @@ async def list_change_events(
     return [ChangeEventResponse.model_validate(e) for e in result.scalars().all()]
 
 
-@router.post("/simulate-change", status_code=status.HTTP_201_CREATED)
+@router.post("/simulate-change", response_model=ChangeSimulationResponse, status_code=status.HTTP_200_OK)
 async def simulate_source_change(
     body: SourceChangeRequest,
     db: DbDep,
     current_user: User = Depends(require_role(
         UserRole.administrator, UserRole.brand_manager
     )),
-) -> dict:
-    """Execute Rule 6: Simulate a live brand specification update in a single transaction."""
-    from app.services.continuity import trigger_source_version_change
-    from app.models.knowledge import KnowledgeSource
+) -> ChangeSimulationResponse:
+    """Simulate blast radius of a rule or source change without applying it."""
+    from app.services.continuity import simulate_rule_or_source_change
 
-    target_source_id = body.source_id
-    if not target_source_id:
-        src_res = await db.execute(
-            select(KnowledgeSource)
-            .where(KnowledgeSource.org_id == current_user.org_id)
-            .order_by(KnowledgeSource.created_at.desc())
-            .limit(1)
-        )
-        src = src_res.scalar_one_or_none()
-        if not src:
-            raise HTTPException(status_code=404, detail="No knowledge source found in organization to simulate change")
-        target_source_id = src.id
-
-    result = await trigger_source_version_change(
+    result = await simulate_rule_or_source_change(
         db,
-        source_id=target_source_id,
+        org_id=current_user.org_id,
+        rule_name=body.rule_name,
+        source_id=body.source_id,
+        change_summary=body.change_summary,
+    )
+    return ChangeSimulationResponse.model_validate(result)
+
+
+@router.post("/apply-change", response_model=ChangeApplyResponse, status_code=status.HTTP_201_CREATED)
+async def apply_source_change(
+    body: SourceChangeRequest,
+    db: DbDep,
+    current_user: User = Depends(require_role(
+        UserRole.administrator, UserRole.brand_manager
+    )),
+) -> ChangeApplyResponse:
+    """Execute change in a single transaction, queuing revalidation tasks and logging to audit chain."""
+    from app.services.continuity import apply_rule_or_source_change
+
+    result = await apply_rule_or_source_change(
+        db,
         org_id=current_user.org_id,
         actor=current_user,
+        rule_name=body.rule_name,
+        source_id=body.source_id,
         change_summary=body.change_summary,
         new_content_text=body.new_content_text,
     )
-    return result
+    return ChangeApplyResponse.model_validate(result)
 
 
 

@@ -18,25 +18,8 @@ from app.schemas.validation import (
     ValidationJobCreate, ValidationJobList, ValidationJobResponse,
 )
 from app.services.jobs import enqueue_job
-from datetime import timedelta
 
 router = APIRouter(prefix="/validation", tags=["validation"])
-
-_submit_user_timestamps: dict[uuid.UUID, list[datetime]] = {}
-
-
-def _check_submit_rate_limit(user_id: uuid.UUID) -> None:
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=1)
-    timestamps = [t for t in _submit_user_timestamps.get(user_id, []) if t > cutoff]
-    if len(timestamps) >= 60:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Submission rate limit exceeded. Please wait before submitting more content.",
-        )
-    timestamps.append(now)
-    _submit_user_timestamps[user_id] = timestamps
-
 
 @router.post("/jobs", response_model=ValidationJobResponse, status_code=status.HTTP_201_CREATED)
 async def submit_validation_job(
@@ -46,7 +29,6 @@ async def submit_validation_job(
         UserRole.administrator, UserRole.brand_manager, UserRole.creator, UserRole.reviewer
     )),
 ) -> ValidationJobResponse:
-    _check_submit_rate_limit(current_user.id)
     job = ValidationJob(
         org_id=current_user.org_id,
         content_text=body.content_text,

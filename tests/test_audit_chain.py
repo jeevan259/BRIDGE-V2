@@ -107,10 +107,27 @@ def test_audit_chain_verification_detects_tampering():
 
         verification = await verify_audit_chain(mock_db, org_id)
         assert verification["is_valid"] is False
+        assert verification["valid"] is False
         assert verification["broken_at"] == tampered_event_id
-        assert "Hash mismatch" in verification["message"]
+        assert verification["first_broken_seq"] == 2
+        assert "Tampering detected" in verification["message"] or "Hash mismatch" in verification["message"]
 
     asyncio.run(_run())
+
+
+def test_audit_verify_response_model():
+    """Verify AuditVerifyResponse schema has required fields valid, checked_count, first_broken_seq."""
+    from app.schemas.audit import AuditVerifyResponse
+
+    resp = AuditVerifyResponse(
+        is_valid=True,
+        total_events=12,
+        broken_at=None,
+        message="Chain intact",
+    )
+    assert resp.valid is True
+    assert resp.checked_count == 12
+    assert resp.first_broken_seq is None
 
 
 def test_audit_chain_empty():

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.validation import (
     FindingSeverity, FindingStatus, FindingType, JobStatus, OverrideReasonCode
@@ -12,7 +12,7 @@ from app.models.validation import (
 
 
 class ValidationJobCreate(BaseModel):
-    content_text: str
+    content_text: str = Field(min_length=1, max_length=20000)
     content_title: str | None = None
 
 
@@ -23,6 +23,7 @@ class ValidationJobResponse(BaseModel):
     status: JobStatus
     ai_provider_used: str | None
     fallback_used: bool
+    ai_limited_mode: bool
     created_at: datetime
     completed_at: datetime | None
     error_message: str | None

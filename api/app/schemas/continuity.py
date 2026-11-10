@@ -94,6 +94,37 @@ class RevalidationTaskUpdate(BaseModel):
 
 class SourceChangeRequest(BaseModel):
     source_id: uuid.UUID | None = None
-    change_summary: str = "Updated SLA latency specification from 50ms to 45ms"
+    rule_name: str | None = None
+    change_summary: str = "Updated clearspace requirements to 40px minimum padding"
     new_content_text: str | None = None
+    dry_run: bool = False
+
+
+class ChangeSimulationResponse(BaseModel):
+    simulation: bool = True
+    rule_name: str
+    change_summary: str
+    impacted_guidelines_count: int
+    impacted_guidelines: list[str]
+    impacted_assets_count: int
+    impacted_assets: list[str]
+    blast_radius_score: float
+    revalidation_queued: bool = False
+    message: str
+
+
+class ChangeApplyResponse(BaseModel):
+    applied: bool = True
+    change_event_id: uuid.UUID
+    impact_report_id: uuid.UUID
+    rule_name: str
+    change_summary: str
+    impacted_guidelines_count: int
+    impacted_guidelines: list[str]
+    impacted_assets_count: int
+    impacted_assets: list[str]
+    blast_radius_score: float
+    tasks_enqueued: int
+    revalidation_queued: bool = True
+    message: str
 

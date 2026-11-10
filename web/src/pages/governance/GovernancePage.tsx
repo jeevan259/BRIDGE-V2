@@ -69,8 +69,30 @@ export const GovernancePage: React.FC = () => {
     refetchOnWindowFocus: false,
   });
 
+  const tamperMutation = useMutation({
+    mutationFn: async () => {
+      await apiClient.post('/demo/tamper');
+    },
+    onSuccess: () => {
+      triggerVerify();
+      refetchEvents();
+    },
+  });
+
+  const untamperMutation = useMutation({
+    mutationFn: async () => {
+      await apiClient.post('/demo/untamper');
+    },
+    onSuccess: () => {
+      triggerVerify();
+      refetchEvents();
+    },
+  });
+
   const events = auditData?.items || [];
-  const isValid = verifyResult?.is_valid ?? true;
+  const isValid = verifyResult?.valid ?? verifyResult?.is_valid ?? true;
+  const brokenSeq = verifyResult?.first_broken_seq;
+  const checkedCount = verifyResult?.checked_count ?? verifyResult?.total_events ?? auditData?.total ?? 0;
 
   const handleCopyHash = (hash: string) => {
     navigator.clipboard.writeText(hash);
@@ -93,6 +115,28 @@ export const GovernancePage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          {user?.role === 'administrator' && (
+            <>
+              <Button
+                variant="danger"
+                size="sm"
+                leftIcon={<ShieldAlert className="w-4 h-4" />}
+                isLoading={tamperMutation.isPending}
+                onClick={() => tamperMutation.mutate()}
+              >
+                Simulate attacker
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                isLoading={untamperMutation.isPending}
+                onClick={() => untamperMutation.mutate()}
+              >
+                Restore chain
+              </Button>
+            </>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -100,7 +144,7 @@ export const GovernancePage: React.FC = () => {
             isLoading={isVerifying}
             onClick={() => triggerVerify()}
           >
-            Verify Hash Chain
+            Verify Chain
           </Button>
         </div>
       </div>
@@ -126,8 +170,8 @@ export const GovernancePage: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-white">
-                  {isValid ? 'Cryptographic Chain Verified Intact' : 'Audit Chain Mismatch Detected'}
+                <h3 className={`text-lg font-bold ${isValid ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {isValid ? 'Chain intact' : `Tampering detected at #${brokenSeq ?? '?'}`}
                 </h3>
                 <StatusChip
                   status={isValid ? 'confirmed' : 'high'}
@@ -136,8 +180,9 @@ export const GovernancePage: React.FC = () => {
                 />
               </div>
               <p className="text-xs text-slate-300 mt-1">
-                {verifyResult?.message ||
-                  'All sequential blocks pass cryptographic SHA-256 ancestor digest matching.'}
+                {isValid
+                  ? (verifyResult?.message || `All ${checkedCount} sequential events pass cryptographic SHA-256 ancestor digest matching.`)
+                  : `Cryptographic SHA-256 link mismatch detected at block #${brokenSeq}. Ledger tampering prevented.`}
               </p>
             </div>
           </div>
@@ -146,7 +191,7 @@ export const GovernancePage: React.FC = () => {
             <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg">
               <span className="text-slate-500 block">TOTAL LOGGED EVENTS</span>
               <span className="text-lg font-bold text-slate-200">
-                {verifyResult?.total_events ?? auditData?.total ?? 0}
+                {checkedCount}
               </span>
             </div>
             <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg">

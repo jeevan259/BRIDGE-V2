@@ -120,13 +120,19 @@ def test_hash_embedding_empty_input():
 def test_provider_factory():
     """Provider factory returns correct types based on config."""
     from app.ai.gemini import get_llm_provider, get_embedding_provider
+    from app.core.config import settings
 
-    llm = get_llm_provider()
-    emb = get_embedding_provider()
+    old_provider = settings.ai_provider
+    try:
+        object.__setattr__(settings, "ai_provider", "mock")
+        llm = get_llm_provider()
+        emb = get_embedding_provider()
 
-    # With default config (AI_PROVIDER=mock), should return mock providers
-    assert llm.provider_name in ("mock", "adversarial", "gemini")
-    assert emb.provider_name == "hash-embedding"
+        # With default config (AI_PROVIDER=mock), should return mock providers
+        assert llm.provider_name in ("mock", "adversarial", "gemini")
+        assert emb.provider_name == "hash-embedding"
+    finally:
+        object.__setattr__(settings, "ai_provider", old_provider)
 
 
 def test_gemini_missing_key_falls_back_and_reports_mode():
@@ -159,11 +165,14 @@ def test_gemini_missing_key_falls_back_and_reports_mode():
     asyncio.run(_run())
 
 
-def test_production_gemini_requires_key():
+def test_production_gemini_requires_key(monkeypatch):
+    monkeypatch.delenv("ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
     from app.core.config import Settings
 
     with pytest.raises(ValueError, match="GEMINI_API_KEY is required"):
         Settings(
+            _env_file=None,
             environment="production",
             ai_provider="gemini",
             gemini_api_key="",

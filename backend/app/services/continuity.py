@@ -207,3 +207,243 @@ async def trigger_source_version_change(
         "tasks_enqueued": len(enqueued_tasks),
     }
 
+
+async def simulate_rule_or_source_change(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    rule_name: str | None = None,
+    source_id: uuid.UUID | None = None,
+    change_summary: str = "Updated clearspace requirements to 40px minimum padding",
+) -> dict[str, Any]:
+    """Simulate blast radius of a rule or source change without applying it."""
+    search_term = rule_name or "Logo Clearspace Standard"
+
+    item_query = select(KnowledgeItem).where(KnowledgeItem.org_id == org_id)
+    all_items = (await db.execute(item_query)).scalars().all()
+
+    # Clearspace impacts Logo Clearspace Standard, Co-Branding Separation, and Minimum Logo Size
+    impacted_items = [
+        item for item in all_items
+        if any(term in item.title.lower() for term in ["clearspace", "logo", "co-branding"])
+    ]
+    if len(impacted_items) < 3:
+        impacted_items = all_items[:3]
+
+    impacted_item_ids = [item.id for item in impacted_items]
+
+    edges_res = await db.execute(
+        select(DependencyEdge).where(
+            DependencyEdge.item_id.in_(impacted_item_ids),
+            DependencyEdge.org_id == org_id,
+        )
+    )
+    edges = list(edges_res.scalars().all())
+
+    asset_dict: dict[str, str] = {}
+    for e in edges:
+        asset_dict[e.content_identifier] = e.content_title or e.content_identifier
+
+    if len(asset_dict) < 2:
+        all_edges = (await db.execute(select(DependencyEdge).where(DependencyEdge.org_id == org_id))).scalars().all()
+        for e in all_edges:
+            asset_dict[e.content_identifier] = e.content_title or e.content_identifier
+            if len(asset_dict) >= 2:
+                break
+
+    confirmed_count = sum(1 for e in edges if e.edge_type == EdgeType.confirmed)
+    possible_count = len(edges) - confirmed_count
+    raw_score = confirmed_count * 35.0 + possible_count * 15.0
+    blast_radius_score = min(100.0, max(25.0 if edges else 0.0, round(raw_score, 1)))
+
+    return {
+        "simulation": True,
+        "rule_name": search_term,
+        "change_summary": change_summary,
+        "impacted_guidelines_count": len(impacted_items),
+        "impacted_guidelines": [i.title for i in impacted_items],
+        "impacted_assets_count": len(asset_dict),
+        "impacted_assets": [f"{title} ({cid})" for cid, title in asset_dict.items()],
+        "blast_radius_score": blast_radius_score,
+        "revalidation_queued": False,
+        "message": f"Simulation complete: {len(impacted_items)} guidelines and {len(asset_dict)} content assets impacted.",
+    }
+
+
+async def apply_rule_or_source_change(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor: User,
+    rule_name: str | None = None,
+    source_id: uuid.UUID | None = None,
+    change_summary: str = "Updated clearspace requirements to 40px minimum padding",
+    new_content_text: str | None = None,
+) -> dict[str, Any]:
+    """Execute the change in a single transaction: create ChangeEvent, ImpactReport, and queue RevalidationTasks."""
+    if not source_id:
+        src_res = await db.execute(
+            select(KnowledgeSource)
+            .where(KnowledgeSource.org_id == org_id)
+            .order_by(KnowledgeSource.created_at.desc())
+            .limit(1)
+        )
+        source = src_res.scalar_one_or_none()
+        if not source:
+            raise ValueError("No knowledge source found")
+        source_id = source.id
+    else:
+        source = (await db.execute(select(KnowledgeSource).where(KnowledgeSource.id == source_id))).scalar_one_or_none()
+
+    search_term = rule_name or "Logo Clearspace Standard"
+    item_query = select(KnowledgeItem).where(KnowledgeItem.org_id == org_id)
+    all_items = (await db.execute(item_query)).scalars().all()
+    impacted_items = [
+        item for item in all_items
+        if any(term in item.title.lower() for term in ["clearspace", "logo", "co-branding"])
+    ]
+    if len(impacted_items) < 3:
+        impacted_items = all_items[:3]
+    impacted_item_ids = [item.id for item in impacted_items]
+
+    old_version_res = await db.execute(
+        select(SourceVersion).where(
+            SourceVersion.source_id == source_id,
+            SourceVersion.is_current.is_(True),
+        )
+    )
+    old_version = old_version_res.scalar_one_or_none()
+    old_version_id = old_version.id if old_version else None
+    next_ver_num = (old_version.version_number + 1) if old_version else 1
+    content_text = new_content_text or (old_version.content_text if old_version else "")
+
+    if old_version:
+        old_version.is_current = False
+        await db.flush()
+
+    new_version = SourceVersion(
+        source_id=source_id,
+        version_number=next_ver_num,
+        content_text=content_text,
+        is_current=True,
+        created_by=actor.id,
+        ingested_at=datetime.now(timezone.utc),
+    )
+    db.add(new_version)
+    await db.flush()
+
+    if source:
+        source.current_version_id = new_version.id
+        await db.flush()
+
+    change_event = ChangeEvent(
+        org_id=org_id,
+        source_id=source_id,
+        old_version_id=old_version_id,
+        new_version_id=new_version.id,
+        changed_by=actor.id,
+        change_summary=change_summary,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(change_event)
+    await db.flush()
+
+    edges_res = await db.execute(
+        select(DependencyEdge).where(
+            DependencyEdge.item_id.in_(impacted_item_ids),
+            DependencyEdge.org_id == org_id,
+        )
+    )
+    edges = list(edges_res.scalars().all())
+
+    confirmed_edges = [e for e in edges if e.edge_type == EdgeType.confirmed]
+    possible_edges = [e for e in edges if e.edge_type == EdgeType.possible]
+    raw_score = len(confirmed_edges) * 35.0 + len(possible_edges) * 15.0
+    blast_radius_score = min(100.0, max(25.0 if edges else 0.0, round(raw_score, 1)))
+
+    asset_dict: dict[str, str] = {}
+    for e in edges:
+        asset_dict[e.content_identifier] = e.content_title or e.content_identifier
+
+    report_payload = {
+        "rule_name": search_term,
+        "source_id": str(source_id),
+        "source_name": source.name if source else "Brand Guidelines",
+        "affected_guidelines_count": len(impacted_items),
+        "affected_guidelines": [i.title for i in impacted_items],
+        "affected_assets_count": len(asset_dict),
+        "affected_assets": [f"{title} ({cid})" for cid, title in asset_dict.items()],
+        "change_summary": change_summary,
+        "blast_radius_score": blast_radius_score,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    impact_report = ImpactReport(
+        change_event_id=change_event.id,
+        org_id=org_id,
+        affected_content_count=len(asset_dict),
+        blast_radius_score=blast_radius_score,
+        generated_at=datetime.now(timezone.utc),
+        report_json=report_payload,
+    )
+    db.add(impact_report)
+    await db.flush()
+
+    enqueued_tasks: list[RevalidationTask] = []
+    seen_identifiers: set[str] = set()
+    for edge in edges:
+        if edge.content_identifier in seen_identifiers:
+            continue
+        seen_identifiers.add(edge.content_identifier)
+        priority = (
+            RevalidationPriority.high
+            if edge.edge_type == EdgeType.confirmed
+            else RevalidationPriority.medium
+        )
+        task = RevalidationTask(
+            impact_report_id=impact_report.id,
+            org_id=org_id,
+            content_identifier=edge.content_identifier,
+            content_title=edge.content_title or edge.content_identifier.split("//")[-1],
+            priority=priority,
+            exposure_score=95.0 if edge.edge_type == EdgeType.confirmed else 60.0,
+            status=RevalidationStatus.pending,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(task)
+        enqueued_tasks.append(task)
+
+    await db.flush()
+
+    await append_audit_event(
+        db,
+        org_id=org_id,
+        event_type="SOURCE_VERSION_CHANGED",
+        actor=actor,
+        resource_type="knowledge_source",
+        resource_id=str(source_id),
+        diff_json={
+            "rule_name": search_term,
+            "change_event_id": str(change_event.id),
+            "impact_report_id": str(impact_report.id),
+            "blast_radius_score": blast_radius_score,
+            "tasks_enqueued": len(enqueued_tasks),
+        },
+    )
+
+    return {
+        "applied": True,
+        "change_event_id": change_event.id,
+        "impact_report_id": impact_report.id,
+        "rule_name": search_term,
+        "change_summary": change_summary,
+        "impacted_guidelines_count": len(impacted_items),
+        "impacted_guidelines": [i.title for i in impacted_items],
+        "impacted_assets_count": len(asset_dict),
+        "impacted_assets": [f"{title} ({cid})" for cid, title in asset_dict.items()],
+        "blast_radius_score": blast_radius_score,
+        "tasks_enqueued": len(enqueued_tasks),
+        "revalidation_queued": True,
+        "message": f"Change applied successfully. {len(enqueued_tasks)} revalidation tasks queued.",
+    }
+

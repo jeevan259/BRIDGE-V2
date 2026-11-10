@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import re
+import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,10 +14,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.base import LLMResponse
-from app.ai.gemini import get_embedding_provider, get_llm_provider
+from app.ai.gemini import get_llm_provider
 from app.core.config import settings
-from app.models.knowledge import ItemStatus, ItemType, ItemVersion, KnowledgeItem, Passage
-from app.models.organisation import Organisation
+from app.models.knowledge import ItemStatus, ItemType, ItemVersion, KnowledgeItem, KnowledgeSource, Passage, SourceVersion
 from app.models.validation import (
     EvidenceReceipt,
     Finding,
@@ -28,6 +30,11 @@ from app.models.validation import (
 from app.services.audit import append_audit_event
 
 logger = logging.getLogger(__name__)
+
+_AI_CHECK_LIMIT = 5
+_AI_CHECK_WINDOW_SECONDS = 3600
+_AI_CHECK_TIMESTAMPS: dict[uuid.UUID, list[float]] = {}
+_VALIDATION_CACHE: dict[str, LLMResponse] = {}
 
 
 async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID, org_id: uuid.UUID) -> dict[str, Any]:
@@ -61,7 +68,14 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
 
     # Fetch corresponding passages for citation grounding
     passages_result = await db.execute(
-        select(Passage).where(Passage.org_id == org_id)
+        select(Passage)
+        .join(SourceVersion, SourceVersion.id == Passage.version_id)
+        .join(KnowledgeSource, KnowledgeSource.id == Passage.source_id)
+        .where(
+            Passage.org_id == org_id,
+            SourceVersion.is_current.is_(True),
+            KnowledgeSource.is_active.is_(True),
+        )
     )
     all_passages = passages_result.scalars().all()
     passages_by_source: dict[uuid.UUID, list[Passage]] = {}
@@ -487,27 +501,12 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
     # ───────────────────────────────────────────────────────────────────────────
     # STAGE 2: Retrieval-Grounded AI & Server-Side Citation Resolution
     # ───────────────────────────────────────────────────────────────────────────
-    context_passages = all_passages
-    embedding_fallback_used = False
-    tenant = await db.get(Organisation, org_id)
-    if tenant and tenant.embedding_provider == "gemini" and settings.ai_provider.lower() == "gemini":
-        embedding_result = await get_embedding_provider().embed([content])
-        embedding_fallback_used = embedding_result.fallback_used
-        if embedding_result.provider == "gemini" and embedding_result.dimensions == 768:
-            ranked = await db.execute(
-                select(Passage)
-                .where(Passage.org_id == org_id, Passage.embedding_vector.is_not(None))
-                .order_by(Passage.embedding_vector.cosine_distance(embedding_result.embeddings[0]))
-                .limit(5)
-            )
-            context_passages = ranked.scalars().all()
-
-    llm = get_llm_provider()
+    context_passages = all_passages[:50]
 
     # Prepare verified passage context for AI
     context_snippets = [
         f"[Passage {p.id}] Source {p.source_id}: {p.text[:300]}"
-        for p in context_passages[:5]
+        for p in context_passages
     ]
     system_prompt = (
         "You are the BRIDGE Brand Compliance Validator. "
@@ -518,9 +517,45 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
         f"Verified Passages:\n" + "\n".join(context_snippets) + f"\n\nContent to review:\n{content}"
     )
 
-    llm_resp: LLMResponse = await llm.complete(system=system_prompt, user=user_prompt)
+    guideline_version = ":".join(sorted(
+        [f"{item.id}:{version.id}" for item, version in approved_items]
+        + [f"{p.source_id}:{p.version_id}" for p in context_passages]
+    ))
+    cache_key = hashlib.sha256(
+        f"{org_id}\0{guideline_version}\0{content}".encode("utf-8")
+    ).hexdigest()
+    cached = _VALIDATION_CACHE.get(cache_key)
+    if cached:
+        llm_resp = replace(cached)
+    else:
+        now = time.monotonic()
+        user_id = job.submitted_by
+        recent = _AI_CHECK_TIMESTAMPS.get(user_id, []) if user_id else []
+        recent = [stamp for stamp in recent if now - stamp < _AI_CHECK_WINDOW_SECONDS]
+        if user_id and settings.ai_provider.lower() == "gemini" and len(recent) >= _AI_CHECK_LIMIT:
+            _AI_CHECK_TIMESTAMPS[user_id] = recent
+            job.ai_limited_mode = True
+            llm_resp = LLMResponse(
+                content="", provider="limited", model=settings.gemini_model,
+                fallback_used=True, fallback_error="Per-user AI check limit reached",
+            )
+        else:
+            if user_id and settings.ai_provider.lower() == "gemini":
+                recent.append(now)
+                _AI_CHECK_TIMESTAMPS[user_id] = recent
+            llm_resp = await get_llm_provider().complete(system=system_prompt, user=user_prompt)
+            if llm_resp.fallback_error and "429" in llm_resp.fallback_error:
+                job.ai_limited_mode = True
+                llm_resp = replace(
+                    llm_resp, content="", provider="limited",
+                    fallback_error="Gemini rate limit exceeded (HTTP 429)",
+                )
+            elif llm_resp.provider == "gemini" and not llm_resp.fallback_used:
+                if len(_VALIDATION_CACHE) >= 512:
+                    _VALIDATION_CACHE.pop(next(iter(_VALIDATION_CACHE)))
+                _VALIDATION_CACHE[cache_key] = replace(llm_resp)
     job.ai_provider_used = llm_resp.provider
-    job.fallback_used = embedding_fallback_used or llm_resp.fallback_used
+    job.fallback_used = bool(llm_resp.fallback_used)
 
     # RULE 4: Server-Side Citation Resolution (Hallucination Trap Detection)
     # Detect if the LLM attempted to cite non-existent UUIDs or fake items
@@ -573,5 +608,6 @@ async def run_validation_pipeline(db: AsyncSession, validation_job_id: uuid.UUID
         "findings_count": len(findings_created),
         "ai_provider": llm_resp.provider,
         "fallback_used": job.fallback_used,
+        "ai_limited_mode": job.ai_limited_mode,
     }
 

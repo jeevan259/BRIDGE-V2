@@ -57,6 +57,17 @@ class GeminiLLMProvider(LLMProvider):
     def provider_name(self) -> str:
         return "gemini"
 
+    async def probe(self) -> None:
+        if not settings.gemini_api_key.strip():
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        async with httpx.AsyncClient(timeout=8) as client:
+            response = await client.get(
+                f"{_API_ROOT}/{settings.gemini_model}",
+                headers={"x-goog-api-key": settings.gemini_api_key},
+            )
+        if response.is_error:
+            raise RuntimeError(f"Gemini model probe returned HTTP {response.status_code}")
+
     async def complete(self, system: str, user: str, **kwargs: object) -> LLMResponse:
         if not settings.gemini_api_key.strip():
             raise RuntimeError("GEMINI_API_KEY is not configured")
@@ -92,7 +103,15 @@ class GeminiLLMProvider(LLMProvider):
                 return LLMResponse(content=content, provider="gemini", model=settings.gemini_model)
             except Exception as exc:
                 last_exc = exc
-                if attempt < retries - 1 and isinstance(exc, (httpx.TimeoutException, httpx.HTTPError)):
+                if (
+                    attempt < retries - 1
+                    and isinstance(exc, (httpx.TimeoutException, httpx.HTTPError))
+                    and not (
+                        isinstance(exc, httpx.HTTPStatusError)
+                        and exc.response is not None
+                        and exc.response.status_code == 429
+                    )
+                ):
                     await asyncio.sleep(backoff)
                     backoff *= 2
                 else:
@@ -110,10 +129,14 @@ class FallbackLLMProvider(LLMProvider):
         return "gemini"
 
     async def complete(self, system: str, user: str, **kwargs: object) -> LLMResponse:
-        global _last_error
+        global _last_error, _status_cache, _status_cache_until
         try:
             result = await self.live.complete(system, user, **kwargs)
             _last_error = None
+            _status_cache = {
+                "provider": "gemini", "mode": "live", "model": settings.gemini_model, "last_error": None
+            }
+            _status_cache_until = time.monotonic() + 60
             return result
         except Exception as exc:
             _last_error = (
@@ -121,6 +144,14 @@ class FallbackLLMProvider(LLMProvider):
                 if not settings.gemini_api_key.strip()
                 else _error_summary(exc)
             )
+            limited = "429" in _last_error or "rate limit" in _last_error.lower()
+            _status_cache = {
+                "provider": "gemini",
+                "mode": "limited" if limited else "mock",
+                "model": settings.gemini_model if limited else "mock-v1",
+                "last_error": _last_error,
+            }
+            _status_cache_until = time.monotonic() + 60
             fallback = await self.mock.complete(system, user, **kwargs)
             fallback.fallback_used = True
             fallback.fallback_error = _last_error
@@ -226,14 +257,20 @@ async def get_ai_status() -> dict[str, str | None]:
             "last_error": "GEMINI_API_KEY is not configured",
         }
     if _last_error and time.monotonic() < _status_cache_until:
-        return {"provider": "gemini", "mode": "fallback", "model": "mock-v1", "last_error": _last_error}
+        limited = "429" in _last_error or "rate limit" in _last_error.lower()
+        return {
+            "provider": "gemini",
+            "mode": "limited" if limited else "mock",
+            "model": settings.gemini_model if limited else "mock-v1",
+            "last_error": _last_error,
+        }
     if _status_cache and time.monotonic() < _status_cache_until:
         return dict(_status_cache)
     async with _status_lock:
         if _status_cache and time.monotonic() < _status_cache_until:
             return dict(_status_cache)
         try:
-            await GeminiLLMProvider().complete("Status probe.", "Reply with OK.")
+            await GeminiLLMProvider().probe()
             _last_error = None
             _status_cache = {
                 "provider": "gemini", "mode": "live", "model": settings.gemini_model, "last_error": None
@@ -241,7 +278,10 @@ async def get_ai_status() -> dict[str, str | None]:
         except Exception as exc:
             _last_error = _error_summary(exc)
             _status_cache = {
-                "provider": "gemini", "mode": "fallback", "model": "mock-v1", "last_error": _last_error
+                "provider": "gemini",
+                "mode": "limited" if "429" in _last_error else "mock",
+                "model": settings.gemini_model if "429" in _last_error else "mock-v1",
+                "last_error": _last_error,
             }
         _status_cache_until = time.monotonic() + 60
         return dict(_status_cache)
