@@ -209,12 +209,35 @@ async def cleanup_guests(
     return {"deleted_guests_count": count}
 
 
+_auth_ip_timestamps: dict[str, list[datetime]] = {}
+
+
+def _check_auth_rate_limit(client_ip: str) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=15)
+    timestamps = [t for t in _auth_ip_timestamps.get(client_ip, []) if t > cutoff]
+    if len(timestamps) >= 60:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many authentication attempts. Please try again later.",
+        )
+    timestamps.append(now)
+    _auth_ip_timestamps[client_ip] = timestamps
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(
+    request: Request,
     body: LoginRequest,
     response: Response,
     db: DbDep,
 ) -> TokenResponse:
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
+    _check_auth_rate_limit(client_ip)
+
     user = await authenticate_user(db, body.email, body.password)
     if not user:
         raise HTTPException(
