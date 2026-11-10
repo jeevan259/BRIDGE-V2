@@ -79,3 +79,57 @@ async def health() -> dict:
         "environment": settings.environment,
         "ai_status": settings.ai_status,
     }
+
+
+@app.get("/ready", tags=["health"])
+async def ready() -> dict:
+    """Readiness probe checking database connectivity and pgvector extension."""
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import text
+
+    checks: dict[str, str] = {
+        "database": "unknown",
+        "pgvector": "unknown",
+    }
+    is_ready = True
+
+    if settings.demo_mode:
+        checks["database"] = "ok (demo_mode)"
+        checks["pgvector"] = "ok (demo_mode)"
+        return {
+            "status": "ok",
+            "checks": checks,
+            "environment": settings.environment,
+            "demo_mode": True,
+        }
+
+    try:
+        async with AsyncSessionLocal() as session:
+            # 1. Check basic DB connectivity
+            await session.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+
+            # 2. Check pgvector extension
+            res = await session.execute(
+                text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+            )
+            has_vector = res.scalar_one_or_none() is not None
+            if has_vector:
+                checks["pgvector"] = "ok"
+            else:
+                checks["pgvector"] = "missing"
+                is_ready = False
+    except Exception as exc:
+        checks["database"] = f"unreachable: {str(exc)}"
+        checks["pgvector"] = "unknown"
+        is_ready = False
+
+    payload = {
+        "status": "ok" if is_ready else "error",
+        "checks": checks,
+        "environment": settings.environment,
+        "demo_mode": settings.demo_mode,
+    }
+    if not is_ready:
+        return JSONResponse(status_code=503, content=payload)
+    return payload

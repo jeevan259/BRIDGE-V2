@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
+    # Cookie settings (fully environment-driven)
+    cookie_secure: bool | None = None
+    cookie_samesite: str = "lax"  # lax | strict | none
+    cookie_domain: str | None = None
+
     # AI Provider
     ai_provider: str = "mock"  # gemini | mock | adversarial
     gemini_api_key: str = ""
@@ -41,9 +46,25 @@ class Settings(BaseSettings):
     environment: str = "development"
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "/tmp/bridge_uploads"
+    demo_mode: bool = False
 
     # Derived status
     ai_status: str = "AI: offline mode"
+
+    @property
+    def is_cookie_secure(self) -> bool:
+        if self.cookie_secure is not None:
+            return self.cookie_secure
+        if self.cookie_samesite.lower() == "none":
+            return True
+        return not self.is_development
+
+    @property
+    def resolved_cookie_samesite(self) -> str:
+        val = self.cookie_samesite.lower()
+        if val in ("lax", "strict", "none"):
+            return val
+        return "lax"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

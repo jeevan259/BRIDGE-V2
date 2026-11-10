@@ -12,7 +12,7 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.errors import http_exception_handler
 from app.core.logging import CorrelationIdMiddleware, correlation_id_ctx
-from app.main import app, health
+from app.main import app, health, ready
 from app.models.user import UserRole
 
 
@@ -24,6 +24,28 @@ def test_health_check_returns_ai_status():
         assert data["version"] == "2.0.0"
         assert "ai_status" in data
         assert "AI:" in data["ai_status"]
+
+    asyncio.run(_run())
+
+
+def test_ready_check_returns_db_and_vector_status():
+    """Verify readiness check inspects db and pgvector without crashing."""
+    async def _run():
+        prev_demo = settings.demo_mode
+        object.__setattr__(settings, "demo_mode", True)
+        try:
+            res = await ready()
+            if hasattr(res, "body"):
+                import json
+                data = json.loads(res.body.decode("utf-8"))
+            else:
+                data = res
+            assert data["status"] == "ok"
+            assert "checks" in data
+            assert "database" in data["checks"]
+            assert "pgvector" in data["checks"]
+        finally:
+            object.__setattr__(settings, "demo_mode", prev_demo)
 
     asyncio.run(_run())
 
