@@ -1,84 +1,58 @@
-# BRIDGE v2 — Production Deployment Guide (Render + Vercel)
+# BRIDGE v2 deployment (Render + Vercel)
 
-**Target Stack**:
-- **Backend API**: Render Web Service (Docker container: Python 3.12-slim, non-root user, Uvicorn with `--proxy-headers`, background JobWorker, Alembic auto-migration).
-- **Frontend SPA**: Vercel (Vite + React, client-side routing with `vercel.json` SPA rewrite, code-split bundles <330 kB).
-- **Database**: Neon Serverless PostgreSQL with `pgvector` extension and tamper-evident append-only audit trigger.
+Use the direct Neon database hostname for `DATABASE_URL` (the hostname ending in `.neon.tech`, without `-pooler`). The container runs Alembic migrations before starting Uvicorn. Render supplies `PORT` at runtime.
 
----
+## Render environment variables
 
-## 1. Environment Variables Reference
+In Render, open the API service **Environment** tab and add these values. Replace angle-bracket placeholders with values from your own service; never commit them.
 
-### Backend API (Render)
+| Key | Value |
+|---|---|
+| `DATABASE_URL` | `postgresql+asyncpg://<user>:<password>@<direct-neon-host>.neon.tech/<database>?ssl=require` |
+| `DATABASE_SYNC_URL` | `postgresql://<user>:<password>@<direct-neon-host>.neon.tech/<database>?sslmode=require` |
+| `ENV` | `production` |
+| `DEMO_MODE` | `true` |
+| `AI_PROVIDER` | `gemini` |
+| `GEMINI_API_KEY` | Your Gemini API key |
+| `JWT_SECRET_KEY` | A unique random 64-character hex secret |
+| `CORS_ORIGINS` | Exactly `https://<your-project>.vercel.app` (no trailing slash; use the production Vercel domain) |
+| `COOKIE_SAMESITE` | `None` |
+| `COOKIE_SECURE` | `true` |
+| `DEMO_PASSWORD` | A strong demo-account password |
 
-| Variable | Recommended Value / Format | Purpose |
-|---|---|---|
-| `DATABASE_URL` | `postgresql+asyncpg://<user>:<password>@<neon-host>/<db>?ssl=require` | Async database connection for SQLAlchemy / asyncpg. |
-| `DATABASE_SYNC_URL` | `postgresql://<user>:<password>@<neon-host>/<db>?sslmode=require` | Synchronous database connection for Alembic migrations. |
-| `ENVIRONMENT` | `production` | Enforces production security headers and cookie policies. |
-| `DEMO_MODE` | `true` | Enables guest evaluation access and one-click role logins. |
-| `AI_PROVIDER` | `gemini` | Configures Gemini LLM and 768d embedding engine with mock fallback. |
-| `GEMINI_API_KEY` | `<your-google-ai-studio-gemini-key>` | API key for Gemini 1.5 Flash and text-embedding-004. |
-| `JWT_SECRET_KEY` | `<32-random-hex-chars>` | Signs JWT access tokens (HS256). |
-| `CORS_ORIGINS` | `https://<your-vercel-app>.vercel.app` | Exact frontend origin allowed for credentialed cross-origin requests. |
-| `COOKIE_SECURE` | `true` | Attaches `Secure` attribute to refresh token cookies. |
-| `COOKIE_SAMESITE` | `none` | Allows cross-site cookie transmission between Vercel and Render domains. |
-| `DEMO_PASSWORD` | `password123` | Master password for the 5 seeded tenant accounts (*@aurora.local). |
-| `PORT` | `8000` | Port assigned by Render runtime (default: 8000 or $PORT). |
+Do not set `PORT`; Render supplies it. `DATABASE_URL` must use the direct Neon host, not the pooled host.
 
-### Frontend Web (Vercel)
+## Vercel environment variables
 
-| Variable | Recommended Value | Purpose |
-|---|---|---|
-| `VITE_API_URL` | `https://<your-render-backend-url>` | Points the frontend API client to the live Render backend. |
+| Key | Value |
+|---|---|
+| `VITE_API_URL` | `https://<your-render-service>.onrender.com` (no `/api/v1` suffix) |
 
----
+## Exact setup clicks
 
-## 2. Step-by-Step Render Deployment (Backend)
+### Create the API on Render
 
-1. Log in to [Render Dashboard](https://dashboard.render.com).
-2. Click **New +** -> **Web Service**.
-3. Select **Build and deploy from a Git repository** and connect your BRIDGE repository.
-4. Fill in the service configuration:
-   - **Name**: `bridge-api`
-   - **Region**: `Ohio (US East)` (to match Neon us-east-2 region for lowest latency).
-   - **Language**: `Docker`
-   - **Dockerfile Path**: `api/Dockerfile`
-   - **Docker Context**: `api`
-   - **Instance Type**: `Starter` (or `Free`).
-5. Expand **Advanced** -> **Add Environment Variable**:
-   - Add all variables from the Backend table above.
-6. Click **Create Web Service**.
-7. Render will build the container, run Alembic migrations on startup (`api/start.sh`), seed baseline tenant data, and start Uvicorn.
-8. Note your public backend URL (e.g. `https://bridge-api-xxxx.onrender.com`).
+1. Open the Render Dashboard and click **New +** → **Web Service**.
+2. Choose **Build and deploy from a Git repository**, connect the repository, and select branch **main**.
+3. Set **Name** to `bridge-api`, **Root Directory** to `api`, **Runtime** to **Docker**, and **Dockerfile Path** to `Dockerfile`.
+4. Select a web service instance, then click **Advanced** → **Add Environment Variable**. Add every row from the Render table.
+5. Click **Create Web Service**. Wait until the deployment is live; copy its `https://…onrender.com` URL.
 
----
+### Create the frontend on Vercel
 
-## 3. Step-by-Step Vercel Deployment (Frontend)
+1. Open the Vercel Dashboard and click **Add New…** → **Project**.
+2. Import the same Git repository and select branch **main**.
+3. Set **Root Directory** to `web`; keep **Framework Preset** as **Vite**, **Build Command** as `npm run build`, and **Output Directory** as `dist`.
+4. Expand **Environment Variables**, add `VITE_API_URL` using the Render URL, then click **Deploy**.
+5. When the deployment is ready, copy its production `https://…vercel.app` URL.
+6. Return to Render → `bridge-api` → **Environment**. Set `CORS_ORIGINS` to exactly that Vercel URL, with no trailing slash, and click **Save, rebuild, and deploy**.
 
-1. Log in to [Vercel Dashboard](https://vercel.com).
-2. Click **Add New...** -> **Project**.
-3. Select your Git repository.
-4. In the configuration screen:
-   - **Framework Preset**: `Vite`
-   - **Root Directory**: `web` (click Edit and select the `web` folder).
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-5. Under **Environment Variables**:
-   - Key: `VITE_API_URL`
-   - Value: `https://<your-render-backend-url>` (from Step 2).
-6. Click **Deploy**.
-7. Once deployed, copy the production Vercel URL (e.g. `https://bridge-v2.vercel.app`).
-8. Return to Render -> `bridge-api` -> **Environment** -> Update `CORS_ORIGINS` to your exact Vercel URL, and save changes.
+## Smoke check
 
----
-
-## 4. Smoke Verification Script
-
-Once both services are running, run the automated verification script:
+From the repository root, run:
 
 ```bash
-chmod +x scripts/smoke.sh
-./scripts/smoke.sh https://<your-backend-url> https://<your-frontend-url>
+bash scripts/smoke.sh https://<your-render-service>.onrender.com https://<your-project>.vercel.app
 ```
 
+The check requests backend health/readiness and AI status, plus the frontend root and `/review` route.

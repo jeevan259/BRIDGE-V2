@@ -29,6 +29,7 @@ RUN chown -R appuser:appuser /app && chmod +x /app/start.sh
 
 USER appuser
 
+ENV PORT=8000
 EXPOSE 8000
 
 CMD ["/app/start.sh"]

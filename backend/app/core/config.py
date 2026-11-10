@@ -7,7 +7,7 @@ import sys
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("bridge.config")
@@ -46,7 +46,10 @@ class Settings(BaseSettings):
     gemini_embedding_dimensions: int = 768
 
     # App
-    environment: str = "development"
+    environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENV", "ENVIRONMENT"),
+    )
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "/tmp/bridge_uploads"
     demo_mode: bool = False

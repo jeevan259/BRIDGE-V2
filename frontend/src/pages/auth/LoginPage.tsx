@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Layers,
@@ -69,6 +69,16 @@ export const LoginPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isGuestLoading, setIsGuestLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isWaking, setIsWaking] = useState(false);
+
+  useEffect(() => {
+    const onServerWaking = (event: Event) => {
+      setIsWaking((event as CustomEvent<boolean>).detail);
+      setError(null);
+    };
+    window.addEventListener('bridge:server-waking', onServerWaking);
+    return () => window.removeEventListener('bridge:server-waking', onServerWaking);
+  }, []);
 
   const performLogin = (token: string, user: User, targetPath = '/dashboard') => {
     login(token, user);
@@ -88,7 +98,7 @@ export const LoginPage: React.FC = () => {
       const detail =
         err?.response?.data?.error?.message ||
         err?.response?.data?.detail ||
-        err?.message ||
+        (err?.response ? err?.message : 'Waking up the server...') ||
         'Guest access temporarily unavailable';
       setError(String(detail));
     } finally {
@@ -115,9 +125,9 @@ export const LoginPage: React.FC = () => {
       const detail =
         err?.response?.data?.error?.message ||
         err?.response?.data?.detail ||
-        err?.message ||
+        (err?.response ? err?.message : 'Waking up the server...') ||
         'Authentication failed';
-      setError(status ? `HTTP ${status}: ${String(detail)}` : `Network error: ${String(detail)}`);
+      setError(status ? `HTTP ${status}: ${String(detail)}` : (err?.response ? String(detail) : 'Waking up the server...'));
     } finally {
       setIsLoading(false);
     }
@@ -261,10 +271,10 @@ export const LoginPage: React.FC = () => {
             </button>
           </div>
 
-          {error && (
+          {(error || isWaking) && (
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-400 text-xs flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>{error}</span>
+              <span>{isWaking ? 'Waking up the server...' : error}</span>
             </div>
           )}
 
