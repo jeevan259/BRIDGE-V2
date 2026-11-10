@@ -71,7 +71,7 @@ async def add_security_headers(request: Request, call_next):
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=[*settings.cors_origins_list, "https://bridge-v2.pages.dev"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
